@@ -16,8 +16,8 @@ const BLACK = [20, 20, 30], RED = [220, 50, 50], YELLOW = [250, 220, 40], SKY = 
 {
   const P = paper();
   P.rect(0, 300, 959, 305, BLACK);           // 땅선 → 지워져야 함
-  for (const [a, b, c, e] of [[300, 222, 379, 225], [300, 296, 379, 299], [300, 222, 303, 299], [376, 222, 379, 299]]) P.rect(a, b, c, e, BLACK); // 속이 빈 상자 (2칸 높이)
-  P.rect(560, 262, 599, 299, RED);           // 가시
+  for (const [a, b, c, e] of [[300, 262, 379, 265], [300, 296, 379, 299], [300, 262, 303, 299], [376, 262, 379, 299]]) P.rect(a, b, c, e, BLACK); // 속이 빈 상자 (2칸 높이, 한 칸 = 20px)
+  P.rect(560, 282, 589, 299, RED);           // 가시
   P.rect(700, 290, 739, 299, YELLOW);        // 점프 패드
   P.rect(100, 40, 250, 150, SKY);            // 연한 하늘색 = 꾸미기
   P.rect(700, 30, 800, 120, [255, 232, 150]); // 연노랑 해 = 꾸미기
@@ -46,6 +46,41 @@ const BLACK = [20, 20, 30], RED = [220, 50, 50], YELLOW = [250, 220, 40], SKY = 
   check(!r.path && r.dead, '6칸 벽은 깰 수 없음으로 판정');
   const f = C.autoFix(L);
   check(f.ok && f.fixes > 0 && f.L.objs.some(o => o.t === 'b'), `자동 고치기로 완주 가능 (${f.fixes}번 수정, 벽은 남음)`);
+}
+
+{ // 연필 지그재그 = 가시, 블록 아래 지그재그 = 매달린 가시
+  const P = paper();
+  P.rect(0, 300, 959, 305, BLACK);
+  // 이빨 폭 6px짜리 연필 지그재그 (실제 사진에서 칸 하나에 이빨 2~3개 정도)
+  const zig = (x0, x1, yBase, amp) => {
+    let py = yBase;
+    for (let x = x0; x <= x1; x++) {
+      const t = (x - x0) % 6, y = yBase + Math.round(amp * (t < 3 ? t / 3 : (6 - t) / 3));
+      P.rect(x, Math.min(y, py), x + 1, Math.max(y, py), BLACK); py = y;
+    }
+  };
+  zig(400, 520, 299, -18);                                       // 바닥 지그재그
+  P.rect(600, 160, 760, 163, BLACK); P.rect(600, 200, 760, 203, BLACK); P.rect(600, 160, 603, 203, BLACK); P.rect(757, 160, 760, 203, BLACK); // 떠 있는 상자
+  zig(600, 760, 204, 16);                                        // 상자 아래 이빨
+  const L = C.columnsToLevel([C.analyzeDrawing(P.d, P.w, P.h).cols]);
+  const up = L.objs.filter(o => o.t === 's' && !o.d), down = L.objs.filter(o => o.t === 's' && o.d);
+  check(up.length >= 3 && up.every(o => o.y === 0), `바닥 지그재그 → 가시 ${up.length}개`);
+  check(down.length >= 3 && down.every(o => o.y > 2), `상자 아래 지그재그 → 매달린 가시 ${down.length}개`);
+  const back = C.decodeLevel(C.encodeLevel(L));
+  check(back && back.objs.filter(o => o.d).length === down.length, '매달린 가시도 링크로 왕복');
+}
+
+{ // 사진 속 종이 찾기: 회색 배경 위에 기울어진 흰 종이
+  const W = 600, H = 800, d = new Uint8ClampedArray(W * H * 4);
+  const inPaper = (x, y) => { const u = (x - 300) * Math.cos(.1) + (y - 400) * Math.sin(.1), v = -(x - 300) * Math.sin(.1) + (y - 400) * Math.cos(.1); return Math.abs(u) < 220 && Math.abs(v) < 150; };
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const i = (y * W + x) * 4, p = inPaper(x, y), v = p ? 235 : 180 + ((x * 7 + y * 13) % 15); d[i] = v; d[i + 1] = v; d[i + 2] = p ? v - 5 : v - 10; d[i + 3] = 255; }
+  const q = C.findPaper(d, W, H);
+  const pw = q && (C.dist(q[0], q[1]) + C.dist(q[3], q[2])) / 2, ph = q && (C.dist(q[0], q[3]) + C.dist(q[1], q[2])) / 2;
+  check(q && Math.abs(pw - 440) < 20 && Math.abs(ph - 300) < 20, `종이 크기 ${pw && pw.toFixed(0)}×${ph && ph.toFixed(0)} (정답 440×300)`);
+  check(C.findPaper(new Uint8ClampedArray(W * H * 4).fill(240), W, H) === null, '사진 전체가 종이면 null');
+  const vg = new Uint8ClampedArray(W * H * 4);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const i = (y * W + x) * 4, v = 238 - 40 * (((x / W) - .5) ** 2 + ((y / H) - .5) ** 2); vg[i] = vg[i + 1] = vg[i + 2] = v; vg[i + 3] = 255; }
+  check(C.findPaper(vg, W, H) === null, '조명이 고르지 않아도 종이가 꽉 찬 사진은 자르지 않음');
 }
 
 { // 빈 그림, 잘못된 링크

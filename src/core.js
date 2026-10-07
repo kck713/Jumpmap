@@ -79,7 +79,8 @@ function sub(s, dt, hold, L) {
         else { s.dead = true; return; }
       } else if (hx && Math.abs(s.y - top) < 1e-6 && s.vy <= 0) g = true;
     } else if (o.t === 's') {
-      if (R0 > o.x + 0.5 - CFG.sw && L0 < o.x + 0.5 + CFG.sw && s.y < o.y + CFG.sh && s.y + 1 - a > o.y) { s.dead = true; return; }
+      const sy = o.d ? o.y + 1 - CFG.sh : o.y; // d: 아래를 향한(매달린) 가시
+      if (R0 > o.x + 0.5 - CFG.sw && L0 < o.x + 0.5 + CFG.sw && s.y < sy + CFG.sh && s.y + 1 - a > sy) { s.dead = true; return; }
     } else if (o.t === 'p') {
       if (R0 > o.x + 0.1 && L0 < o.x + 0.9 && s.y < o.y + 0.3 && s.vy < CFG.padV - 1) {
         s.vy = CFG.padV; g = false; s.y = Math.max(s.y, o.y + 0.01); s.padHit = true;
@@ -130,7 +131,9 @@ function solveLevel(L, dt = 1 / 60) {
 // ===== 그림 → 맵 =====
 // 진한 선 = 블록, 빨강 = 가시, 노랑 = 점프 패드, 연한 색 = 꾸미기(무시).
 // 그림 높이를 rows칸으로 나누고, 그림의 맨 아래(또는 그려 둔 땅선)가 바닥(y=0)이 된다.
-const DRAW = { rows: 8, maxRows: 12, margin: 0.03, frac: 0.06, gap: 3, lead: 7, tail: 6 };
+// rows: 그림 높이를 몇 칸으로 나눌지, sx: 가로로 늘리는 배율(칸 폭 = 칸 높이 / sx), frac: 칸이 '찼다'고 볼 잉크 비율,
+// zig: 한 줄에 선이 이만큼 이상 끊기면 지그재그(연필로 그린 가시)로 본다
+const DRAW = { rows: 16, sx: 1.5, maxRows: 20, margin: 0.03, frac: 0.025, zig: 2.1, fillMax: 16, gap: 3, lead: 7, tail: 6 };
 
 // 픽셀 분류: 0 빈칸, 1 블록, 2 가시, 3 패드. d는 RGBA 배열.
 function classifyPixels(d, w, h) {
@@ -164,11 +167,87 @@ function classifyPixels(d, w, h) {
   return cls;
 }
 
+// 사진에서 종이 찾기: 가장 큰 '밝고 무채색인' 덩어리의 네 모서리. 못 찾으면 null(사진 전체를 종이로 본다).
+function findPaper(d, w, h) {
+  const n = w * h, lum = new Uint8Array(n), gh = new Uint32Array(256);
+  for (let i = 0; i < n; i++) { const v = (.299 * d[i * 4] + .587 * d[i * 4 + 1] + .114 * d[i * 4 + 2]) | 0; lum[i] = v; gh[v]++; }
+  // 밝은 쪽 절반에서 Otsu 문턱값: 종이와 (밝은) 배경을 가른다
+  let c = 0, mid = 0; for (let v = 0; v < 256; v++) { c += gh[v]; if (c >= n / 2) { mid = v; break; } }
+  let T = mid, bestVar = -1, tot = 0, sum = 0;
+  for (let v = mid; v < 256; v++) { tot += gh[v]; sum += v * gh[v]; }
+  for (let t = mid, w0 = 0, s0 = 0; t < 255; t++) {
+    w0 += gh[t]; s0 += t * gh[t]; const w1 = tot - w0; if (!w0 || !w1) continue;
+    const bv = w0 * w1 * (s0 / w0 - (sum - s0) / w1) ** 2; if (bv > bestVar) { bestVar = bv; T = t; }
+  }
+  const m = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    const r = d[i * 4], g = d[i * 4 + 1], b = d[i * 4 + 2];
+    if (lum[i] > T && Math.max(r, g, b) - Math.min(r, g, b) < 45) m[i] = 1;
+  }
+  // 연필 선이 종이를 끊지 않게 가로·세로로 3px씩 메운다
+  for (let pass = 0; pass < 2; pass++) {
+    const step = pass ? w : 1, src = m.slice();
+    for (let i = 0; i < n; i++) if (!src[i]) {
+      let a = 0, b = 0; for (let k = 1; k <= 3; k++) { if (src[i - k * step]) a = 1; if (src[i + k * step]) b = 1; }
+      if (a && b) m[i] = 2;
+    }
+  }
+  // 3px 깎아서 종이와 배경 사이의 가는 연결을 끊는다
+  for (let pass = 0; pass < 2; pass++) {
+    const step = pass ? w : 1, src = m.slice();
+    for (let i = 0; i < n; i++) if (src[i]) for (let k = -3; k <= 3; k++) { const j = i + k * step; if (j < 0 || j >= n || !src[j] || (!pass && ((j % w) - (i % w)) !== k)) { m[i] = 0; break; } }
+  }
+  // 가장 큰 덩어리
+  const lab = new Int32Array(n), st = new Int32Array(n);
+  let best = 0, bestId = 0, id = 0;
+  for (let s0 = 0; s0 < n; s0++) if (m[s0] && !lab[s0]) {
+    id++; let sp = 0, cnt = 0; st[sp++] = s0; lab[s0] = id;
+    while (sp) {
+      const i = st[--sp], x = i % w; cnt++;
+      if (x > 0 && m[i - 1] && !lab[i - 1]) { lab[i - 1] = id; st[sp++] = i - 1; }
+      if (x < w - 1 && m[i + 1] && !lab[i + 1]) { lab[i + 1] = id; st[sp++] = i + 1; }
+      if (i >= w && m[i - w] && !lab[i - w]) { lab[i - w] = id; st[sp++] = i - w; }
+      if (i < n - w && m[i + w] && !lab[i + w]) { lab[i + w] = id; st[sp++] = i + w; }
+    }
+    if (cnt > best) { best = cnt; bestId = id; }
+  }
+  if (best < n * .05 || best > n * .9) return null;
+  // 종이와 배경의 밝기 차이가 작으면(종이가 사진을 꽉 채우고 조명만 고르지 않은 경우) 자르지 않는다
+  let si = 0, so = 0;
+  for (let i = 0; i < n; i++) if (lab[i] === bestId) si += lum[i]; else so += lum[i];
+  if (si / best - so / (n - best) < 30) return null;
+  // 모서리: x+y, x-y가 가장 작은/큰 점
+  const q = [[0, 0, Infinity], [0, 0, -Infinity], [0, 0, -Infinity], [0, 0, Infinity]]; // TL, TR, BR, BL
+  for (let i = 0; i < n; i++) if (lab[i] === bestId) {
+    const x = i % w, y = (i / w) | 0, s = x + y, t = x - y;
+    if (s < q[0][2]) q[0] = [x, y, s]; if (t > q[1][2]) q[1] = [x, y, t];
+    if (s > q[2][2]) q[2] = [x, y, s]; if (t < q[3][2]) q[3] = [x, y, t];
+  }
+  return q.map(([x, y]) => [x, y]);
+}
+
+// 네 모서리(TL, TR, BR, BL) 사이를 ow×oh 직사각형으로 펴기 (사각형 → 사각형 원근 변환)
+function warpQuad(d, w, h, [[x0, y0], [x1, y1], [x2, y2], [x3, y3]], ow, oh) {
+  const dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3, dy1 = y1 - y2, dy2 = y3 - y2, dy3 = y0 - y1 + y2 - y3;
+  const den = dx1 * dy2 - dx2 * dy1 || 1e-9;
+  const g = (dx3 * dy2 - dx2 * dy3) / den, hh = (dx1 * dy3 - dx3 * dy1) / den;
+  const a = x1 - x0 + g * x1, b = x3 - x0 + hh * x3, e = y1 - y0 + g * y1, f = y3 - y0 + hh * y3;
+  const out = new Uint8ClampedArray(ow * oh * 4);
+  for (let v = 0; v < oh; v++) for (let u = 0; u < ow; u++) {
+    const U = (u + .5) / ow, V = (v + .5) / oh, z = g * U + hh * V + 1;
+    const sx = Math.min(w - 1, Math.max(0, Math.round((a * U + b * V + x0) / z))), sy = Math.min(h - 1, Math.max(0, Math.round((e * U + f * V + y0) / z)));
+    const si = (sy * w + sx) * 4, oi = (v * ow + u) * 4;
+    out[oi] = d[si]; out[oi + 1] = d[si + 1]; out[oi + 2] = d[si + 2]; out[oi + 3] = 255;
+  }
+  return out;
+}
+const dist = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]);
+
 const median = a => [...a].sort((p, q) => p - q)[a.length >> 1];
 
 // 그림 한 장 → 칸 격자와 열(column) 목록
-function analyzeDrawing(d, w, h, rows = DRAW.rows) {
-  const cls = classifyPixels(d, w, h), cs = h / rows;
+function analyzeDrawing(d, w, h, rows = DRAW.rows, sx = DRAW.sx) {
+  const cls = classifyPixels(d, w, h), cs = h / rows, cw = cs / sx;
   let x0 = w, x1 = -1, y1 = -1;
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (cls[y * w + x]) { if (x < x0) x0 = x; if (x > x1) x1 = x; y1 = y; }
   if (x1 < 0) return null;
@@ -193,38 +272,62 @@ function analyzeDrawing(d, w, h, rows = DRAW.rows) {
   }
   let yTop = bottom;
   for (let i = 0; i < bottom * w; i++) if (cls[i]) { yTop = (i / w) | 0; break; }
-  const nc = Math.max(1, Math.ceil((x1 - x0 + 1) / cs));
+  const nc = Math.max(1, Math.ceil((x1 - x0 + 1) / cw));
   const nr = Math.max(1, Math.min(DRAW.maxRows, Math.ceil((bottom - yTop) / cs)));
-  const cnt = new Uint32Array(nc * nr * 4);
-  for (let y = Math.max(0, Math.floor(bottom - nr * cs)); y < bottom; y++) for (let x = x0; x <= x1; x++) {
-    const k = cls[y * w + x]; if (!k) continue;
+  // 칸마다 종류별 잉크 수, 그리고 진한 선이 가로줄 하나에서 몇 번 끊기는지(runs / lines)
+  const cnt = new Uint32Array(nc * nr * 4), edge = new Uint32Array(nc * nr * 2), runs = new Uint32Array(nc * nr), lines = new Uint32Array(nc * nr), lastY = new Int32Array(nc * nr).fill(-1);
+  for (let y = Math.max(0, Math.floor(bottom - nr * cs)); y < bottom; y++) {
     const r = Math.floor((bottom - 1 - y) / cs); if (r >= nr) continue;
-    cnt[(r * nc + Math.floor((x - x0) / cs)) * 4 + k]++;
+    for (let x = x0; x <= x1; x++) {
+      const k = cls[y * w + x]; if (!k) continue;
+      const i = r * nc + Math.floor((x - x0) / cw);
+      cnt[i * 4 + k]++;
+      const fy = (bottom - 1 - y) / cs - r; // 칸 안의 높이 0(아래)~1(위)
+      if (fy > .75) edge[i * 2]++; else if (fy < .25) edge[i * 2 + 1]++;
+      if (k === 1 && (x === x0 || cls[y * w + x - 1] !== 1)) { runs[i]++; if (lastY[i] !== y) { lastY[i] = y; lines[i]++; } }
+    }
   }
-  const g = new Uint8Array(nc * nr), lim = cs * cs * DRAW.frac;
+  const g = new Uint8Array(nc * nr), lim = cs * cw * DRAW.frac;
   for (let i = 0; i < nc * nr; i++) {
     let best = lim, bk = 0;
     for (let k = 1; k <= 3; k++) if (cnt[i * 4 + k] > best) { best = cnt[i * 4 + k]; bk = k; }
+    if (bk === 1 && lines[i] >= cs * .3 && runs[i] / lines[i] >= DRAW.zig) bk = 2; // 지그재그 = 가시
     g[i] = bk;
   }
-  // 테두리만 그린 모양은 속을 채운다: 위·왼쪽·오른쪽 끝에서 닿지 않는 빈칸 = 안쪽
+  // 가시 끝이 옆 칸에 살짝 걸친 것은 지운다: 잉크가 칸의 위/아래 1/4에만 있고 그 너머가 가시인 블록
+  for (let i = 0; i < nc * nr; i++) if (g[i] === 1) {
+    const n = cnt[i * 4 + 1];
+    if ((edge[i * 2] === n && i + nc < nc * nr && g[i + nc] === 2) || (edge[i * 2 + 1] === n && i >= nc && g[i - nc] === 2)) g[i] = 0;
+  }
+  // 테두리만 그린 모양은 속을 채운다: 위·왼쪽·오른쪽 끝에서 빈칸만 따라 닿지 않는 빈칸 = 안쪽
   const seen = new Uint8Array(nc * nr), st = [];
-  const seed = (c, r) => { const i = r * nc + c; if (g[i] !== 1 && !seen[i]) { seen[i] = 1; st.push(i); } };
+  const seed = (c, r) => { const i = r * nc + c; if (!g[i] && !seen[i]) { seen[i] = 1; st.push(i); } };
   for (let c = 0; c < nc; c++) seed(c, nr - 1);
   for (let r = 0; r < nr; r++) { seed(0, r); seed(nc - 1, r); }
   while (st.length) {
     const i = st.pop(), c = i % nc, r = (i / nc) | 0;
     if (c) seed(c - 1, r); if (c < nc - 1) seed(c + 1, r); if (r) seed(c, r - 1); if (r < nr - 1) seed(c, r + 1);
   }
-  for (let i = 0; i < nc * nr; i++) if (!seen[i] && !g[i]) g[i] = 1;
+  // 닫힌 빈 공간 중 작은 것만 채운다 (큰 공간은 그림들 사이의 틈일 가능성이 높다)
+  for (let i0 = 0; i0 < nc * nr; i0++) if (!seen[i0] && !g[i0]) {
+    const reg = [i0]; seen[i0] = 1;
+    for (let j = 0; j < reg.length; j++) {
+      const i = reg[j], c = i % nc, r = (i / nc) | 0;
+      for (const k of [c ? i - 1 : -1, c < nc - 1 ? i + 1 : -1, r ? i - nc : -1, r < nr - 1 ? i + nc : -1])
+        if (k >= 0 && !seen[k] && !g[k]) { seen[k] = 1; reg.push(k); }
+    }
+    if (reg.length <= DRAW.fillMax) for (const i of reg) g[i] = 1;
+  }
   // 열마다 블록(세로 묶음), 가시, 패드. 1칸 이내로 떠 있으면 아래 바닥에 붙인다
   const cols = [];
   for (let c = 0; c < nc; c++) {
-    const at = r => g[r * nc + c], col = { b: [], s: [], p: [] };
+    const at = r => g[r * nc + c], col = { b: [], s: [], v: [], p: [] };
     for (let r = 0; r < nr; r++) {
       const k = at(r);
       if (k === 1) { if (r && at(r - 1) === 1) col.b[col.b.length - 1][1]++; else col.b.push([r, 1]); }
       else if (k > 1 && !(r && at(r - 1) === k)) {
+        let re = r; while (re + 1 < nr && at(re + 1) === k) re++;
+        if (k === 2 && re + 1 < nr && at(re + 1) === 1) { if (!col.v.includes(re)) col.v.push(re); continue; } // 블록에 매달린 가시
         let top = 0; for (let q = r - 1; q >= 0; q--) if (at(q) === 1) { top = q + 1; break; }
         if (k === 3 && r - top > 1) continue;                       // 하늘에 뜬 노랑(해 등)은 꾸미기
         const y = r - top <= 1 ? top : r, list = k === 2 ? col.s : col.p;
@@ -233,16 +336,16 @@ function analyzeDrawing(d, w, h, rows = DRAW.rows) {
     }
     cols.push(col);
   }
-  return { cols, g, nc, nr, x0, bottom, cs };
+  return { cols, g, nc, nr, x0, bottom, cs, cw };
 }
 
 // 여러 장의 열 목록을 이어 붙여 레벨을 만든다. 빈 열은 stretch칸으로 늘려 간격을 벌린다.
-function columnsToLevel(parts, stretch = 3, name = '내 그림 맵') {
+function columnsToLevel(parts, stretch = 1, name = '내 그림 맵') {
   const o = [], cols = [];
   parts.forEach((p, i) => { if (i) for (let k = 0; k < DRAW.gap; k++) cols.push(null); cols.push(...p); });
   let x = DRAW.lead, open = new Map();
   for (const c of cols) {
-    const empty = !c || !(c.b.length || c.s.length || c.p.length), next = new Map();
+    const empty = !c || !(c.b.length || c.s.length || c.v.length || c.p.length), next = new Map();
     if (!empty) {
       for (const [y, h] of c.b) {
         const k = y + ',' + h, prev = open.get(k);
@@ -250,6 +353,7 @@ function columnsToLevel(parts, stretch = 3, name = '내 그림 맵') {
         else { const nb = { t: 'b', x, y, w: 1, h }; o.push(nb); next.set(k, nb); }
       }
       for (const y of c.s) o.push({ t: 's', x, y });
+      for (const y of c.v) o.push({ t: 's', x, y, d: 1 });
       for (const y of c.p) o.push({ t: 'p', x, y });
     }
     open = next; x += empty ? stretch : 1;
@@ -275,16 +379,16 @@ function autoFix(L, max = 60) {
     const o = M.objs[bi];
     if (o.t === 'b' && o.h > 1 && o.y <= d.y) {
       const top = o.y + o.h; o.h--;
-      for (const q of M.objs) if (q.t !== 'b' && q.y === top && q.x >= o.x && q.x < o.x + o.w) q.y--;
+      for (const q of M.objs) if (q.t !== 'b' && !q.d && q.y === top && q.x >= o.x && q.x < o.x + o.w) q.y--;
     } else M.objs.splice(bi, 1);
     n++; r = solveLevel(M);
   }
   return { L: M, fixes: n, ok: !!r.path, res: r };
 }
 
-// 공유 링크용 문자열: 1~이름~끝~b x.y.w.h_s x.y_p x.y ...
+// 공유 링크용 문자열: 1~이름~끝~b x.y.w.h_s x.y_v x.y(매달린 가시)_p x.y ...
 function encodeLevel(L) {
-  const t = L.objs.map(o => o.t === 'b' ? `b${o.x}.${o.y}.${o.w}.${o.h}` : `${o.t}${o.x}.${o.y}`).join('_');
+  const t = L.objs.map(o => o.t === 'b' ? `b${o.x}.${o.y}.${o.w}.${o.h}` : `${o.d ? 'v' : o.t}${o.x}.${o.y}`).join('_');
   return `1~${encodeURIComponent(L.name)}~${L.end}~${t}`;
 }
 function decodeLevel(str) {
@@ -297,9 +401,10 @@ function decodeLevel(str) {
     const ty = tok[0], n = tok.slice(1).split('.').map(Number);
     if (!n.every(ok) || objs.length >= 4000) return null;
     if (ty === 'b' && n.length === 4 && n[1] <= 20 && n[2] >= 1 && n[3] >= 1 && n[3] <= 20) objs.push({ t: 'b', x: n[0], y: n[1], w: n[2], h: n[3] });
+    else if (ty === 'v' && n.length === 2 && n[1] <= 20) objs.push({ t: 's', x: n[0], y: n[1], d: 1 });
     else if ((ty === 's' || ty === 'p' || ty === 'k') && n.length === 2 && n[1] <= 20) objs.push({ t: ty, x: n[0], y: n[1] });
     else return null;
   }
   return { objs: objs.sort((a, b) => a.x - b.x), end: E, name: name || '이름 없는 맵', boss: false };
 }
-if (typeof module !== 'undefined') module.exports = { CFG, buildLevel, LEVELS, newPlayer, step, solveLevel, classifyPixels, analyzeDrawing, columnsToLevel, autoFix, encodeLevel, decodeLevel };
+if (typeof module !== 'undefined') module.exports = { DRAW, findPaper, warpQuad, dist, CFG, buildLevel, LEVELS, newPlayer, step, solveLevel, classifyPixels, analyzeDrawing, columnsToLevel, autoFix, encodeLevel, decodeLevel };

@@ -141,17 +141,25 @@ $('makeBtn').addEventListener('click', e => { e.stopPropagation(); openMaker(); 
 $('mkClose').addEventListener('click', closeMaker);
 maker.addEventListener('keydown', e => { if (e.key === 'Escape') closeMaker(); });
 
-// 사진을 높이 320px로 줄여서 분석한다 (8칸 → 한 칸 40px)
-const PH = 320;
+// 사진을 긴 변 1600px로 줄여 종이를 찾고, 종이만 높이 PH로 반듯하게 편 다음 분석한다
+const PH = 480, SRC = 1600;
 async function readDrawing(file) {
   const url = URL.createObjectURL(file), img = new Image();
   try {
     img.src = url; await img.decode();
-    const w = Math.max(8, Math.min(PH * 10, Math.round(img.naturalWidth * PH / img.naturalHeight)));
+    const k = Math.min(1, SRC / Math.max(img.naturalWidth, img.naturalHeight));
+    const sw = Math.round(img.naturalWidth * k), sh = Math.round(img.naturalHeight * k);
+    const src = document.createElement('canvas'); src.width = sw; src.height = sh;
+    const sx = src.getContext('2d', { willReadFrequently: true });
+    sx.fillStyle = '#fff'; sx.fillRect(0, 0, sw, sh); sx.drawImage(img, 0, 0, sw, sh);
+    const sd = sx.getImageData(0, 0, sw, sh).data;
+    const q = findPaper(sd, sw, sh) || [[0, 0], [sw - 1, 0], [sw - 1, sh - 1], [0, sh - 1]];
+    const pw = (dist(q[0], q[1]) + dist(q[3], q[2])) / 2, ph = (dist(q[0], q[3]) + dist(q[1], q[2])) / 2;
+    const w = Math.max(8, Math.min(PH * 10, Math.round(pw * PH / ph)));
     const c = document.createElement('canvas'); c.width = w; c.height = PH;
-    const x = c.getContext('2d', { willReadFrequently: true });
-    x.fillStyle = '#fff'; x.fillRect(0, 0, w, PH); x.drawImage(img, 0, 0, w, PH);
-    return { canvas: c, a: analyzeDrawing(x.getImageData(0, 0, w, PH).data, w, PH) };
+    const data = warpQuad(sd, sw, sh, q, w, PH);
+    c.getContext('2d').putImageData(new ImageData(data, w, PH), 0, 0);
+    return { canvas: c, data, w, a: null }; // 분석은 rebuild에서 (길이 옵션을 바꿔도 다시 분석)
   } finally { URL.revokeObjectURL(url); }
 }
 // 사진 위에 어떻게 읽었는지 칸 색으로 표시
@@ -162,9 +170,9 @@ function shotView({ canvas, a }) {
     const fill = [, 'rgba(63,227,195,.5)', 'rgba(255,106,77,.6)', 'rgba(255,201,74,.6)'];
     for (let r = 0; r < a.nr; r++) for (let k = 0; k < a.nc; k++) {
       const v = a.g[r * a.nc + k]; if (!v) continue;
-      x.fillStyle = fill[v]; x.fillRect(a.x0 + k * a.cs, a.bottom - (r + 1) * a.cs, a.cs, a.cs);
+      x.fillStyle = fill[v]; x.fillRect(a.x0 + k * a.cw, a.bottom - (r + 1) * a.cs, a.cw, a.cs);
     }
-    x.strokeStyle = COL.mint; x.lineWidth = 3; x.beginPath(); x.moveTo(a.x0, a.bottom); x.lineTo(a.x0 + a.nc * a.cs, a.bottom); x.stroke();
+    x.strokeStyle = COL.mint; x.lineWidth = 3; x.beginPath(); x.moveTo(a.x0, a.bottom); x.lineTo(a.x0 + a.nc * a.cw, a.bottom); x.stroke();
   }
   c.setAttribute('role', 'img'); c.setAttribute('aria-label', a ? '그림을 칸으로 읽은 결과' : '선을 찾지 못한 그림');
   return c;
@@ -181,7 +189,7 @@ function drawPreview(M, res) {
   for (const o of M.objs) {
     const ox = o.x * ts;
     if (o.t === 'b') { x.fillStyle = '#21123b'; x.fillRect(ox, Y(o.y + o.h), o.w * ts, o.h * ts); x.strokeStyle = COL.mint; x.strokeRect(ox + .5, Y(o.y + o.h) + .5, o.w * ts - 1, o.h * ts - 1); }
-    else if (o.t === 's') { x.fillStyle = COL.coral; x.beginPath(); x.moveTo(ox + 1, Y(o.y)); x.lineTo(ox + ts / 2, Y(o.y + .9)); x.lineTo(ox + ts - 1, Y(o.y)); x.fill(); }
+    else if (o.t === 's') { const by = o.d ? o.y + 1 : o.y; x.fillStyle = COL.coral; x.beginPath(); x.moveTo(ox + 1, Y(by)); x.lineTo(ox + ts / 2, Y(o.d ? o.y + .1 : o.y + .9)); x.lineTo(ox + ts - 1, Y(by)); x.fill(); }
     else if (o.t === 'p') { x.fillStyle = COL.gold; x.fillRect(ox + 1, Y(o.y + .3), ts - 2, ts * .3); }
     else if (o.t === 'k') { x.fillStyle = COL.gold; x.beginPath(); x.arc(ox + ts / 2, Y(o.y + .5), ts * .36, 0, Math.PI * 2); x.fill(); }
   }
@@ -204,9 +212,11 @@ function showResult(fixes) {
   else say(`${fixed}${Math.round(mkRes.dead ? mkRes.dead.x : mkRes.far)}칸 근처에서 막혀요. 빨간 점선 부분을 다시 그리거나 '자동으로 고치기'를 눌러 보세요. 깰 수 있는 맵만 공유할 수 있어요.`, true);
 }
 function rebuild() {
+  for (const s of mkShots) s.a = analyzeDrawing(s.data, s.w, PH, DRAW.rows, +$('mkGap').value);
+  $('mkShots').replaceChildren(...mkShots.map(shotView));
   const parts = mkShots.filter(s => s.a).map(s => s.a.cols);
   if (!parts.length) { mkLevel = null; $('mkPvBox').hidden = true; $('mkPlay').disabled = $('mkShare').disabled = true; $('mkFix').hidden = true; return; }
-  mkLevel = columnsToLevel(parts, +$('mkGap').value, $('mkName').value.trim() || '내 그림 맵');
+  mkLevel = columnsToLevel(parts, 1, $('mkName').value.trim() || '내 그림 맵');
   showResult(0);
 }
 $('mkFile').addEventListener('change', async e => {
@@ -215,7 +225,6 @@ $('mkFile').addEventListener('change', async e => {
   try { mkShots = await Promise.all(files.map(readDrawing)); }
   catch (err) { mkShots = []; say('그림 파일을 열지 못했어요. 사진(JPG, PNG)으로 다시 골라 주세요.', true); return; }
   finally { e.target.value = ''; }
-  $('mkShots').replaceChildren(...mkShots.map(shotView));
   rebuild();
   if (!mkLevel) say('그림에서 선을 찾지 못했어요. 진한 펜으로 그리고 밝은 곳에서 찍어 주세요.', true);
   else if (mkShots.some(s => !s.a)) say(mkMsg.textContent + ' (선이 안 보이는 그림은 뺐어요.)', !mkRes.path);
@@ -296,7 +305,8 @@ function draw(now) {
       for (let j = 1; j < o.h; j++) { ctx.beginPath(); ctx.moveTo(x, Y(o.y + j)); ctx.lineTo(x + o.w * T, Y(o.y + j)); ctx.stroke(); }
     } else if (o.t === 's') {
       ctx.fillStyle = COL.coral; ctx.shadowColor = COL.coral; ctx.shadowBlur = 8 + pulse * 10;
-      ctx.beginPath(); ctx.moveTo(x + T * .08, Y(o.y)); ctx.lineTo(x + T * .5, Y(o.y + .92)); ctx.lineTo(x + T * .92, Y(o.y)); ctx.closePath(); ctx.fill();
+      const by = o.d ? o.y + 1 : o.y, ty = o.d ? o.y + .08 : o.y + .92; // d: 매달린 가시는 아래를 향한다
+      ctx.beginPath(); ctx.moveTo(x + T * .08, Y(by)); ctx.lineTo(x + T * .5, Y(ty)); ctx.lineTo(x + T * .92, Y(by)); ctx.closePath(); ctx.fill();
       ctx.shadowBlur = 0;
     } else if (o.t === 'p') {
       ctx.fillStyle = COL.gold; ctx.shadowColor = COL.gold; ctx.shadowBlur = 14;

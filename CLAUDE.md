@@ -15,7 +15,8 @@ Neon Cube Run: 지오메트리 대시 스타일 원터치 리듬 러너. 바닐�
   - 오브젝트 타입: `s` 가시, `b` 블록, `p` 점프 패드, `k` 가시 공(원형 판정), `L` 레이저(플레이어 x가 `[x, x+len]`이고 높이가 `[y0, y1]`과 겹치면 사망. `warn`은 경고를 시작하는 거리).
   - 오브젝트 배열은 x 기준으로 정렬되어 있어야 한다 (충돌 루프가 일찍 break함).
   - `solveLevel(L)`: 완주 경로 DFS. verify와 브라우저(맵 만들기 화면)가 같이 쓴다. `dead`는 가장 멀리 간 사망 지점이다.
-  - 그림 → 맵: `classifyPixels`(픽셀을 블록·가시·패드로 분류) → `analyzeDrawing`(땅선 제거, 칸 격자, 속 채우기, 열 목록) → `columnsToLevel`(여러 장 이어 붙이기, 빈 열 늘리기). 설정값은 `DRAW`에 있다.
+  - 그림 → 맵: `findPaper` + `warpQuad`(사진에서 종이를 찾아 펴기) → `classifyPixels`(픽셀을 블록·가시·패드로 분류) → `analyzeDrawing`(땅선 제거, 칸 격자, 지그재그 = 가시, 작은 닫힌 공간 채우기, 열 목록) → `columnsToLevel`(여러 장 이어 붙이기). 설정값은 `DRAW`에 있다.
+  - 가시 `d: 1`은 블록에 매달린(아래를 향한) 가시다. 판정 박스가 칸 위쪽에 붙는다. 링크에서는 `v` 토큰.
   - `autoFix(L)`: 사망 지점의 장애물을 하나씩 낮추거나 치워서 깰 수 있게 만든다.
   - `encodeLevel` / `decodeLevel`: 공유 링크 `#map=...` 형식. 링크는 외부 입력이므로 decode에서 범위를 검사한다.
 - `src/ui.js`: IIFE 하나에 렌더링(`draw`, `drawBoss`, `spikyBall`), 입력, WebAudio 신스(`basslines`, `schedule`, `sfx`), 메뉴(`pick`, `showMenu`, `start`), 루프(`frame`)가 들어 있다.

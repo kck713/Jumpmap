@@ -95,15 +95,15 @@ kbd{font-family:var(--body);border:1px solid var(--mute);border-radius:4px;paddi
       <div class="mk-head"><h2 id="mkTitle">그림으로 맵 만들기</h2><button class="mute" id="mkClose" type="button">닫기</button></div>
       <ul class="rules">
         <li><i style="--c:#1d1a22"></i><span><b>검정·진한 색</b> 블록</span></li>
-        <li><i style="--c:#e8423a"></i><span><b>빨강</b> 가시</span></li>
+        <li><i style="--c:#e8423a"></i><span><b>빨강·지그재그</b> 가시</span></li>
         <li><i style="--c:#f6d32d"></i><span><b>노랑</b> 점프 패드</span></li>
         <li><i style="--c:#bcd7f2"></i><span><b>연한 색</b> 꾸미기</span></li>
       </ul>
-      <p>흰 종이에 그리고 종이만 보이게 찍어 주세요. 큐브는 왼쪽에서 오른쪽으로 달리고, 그림 맨 아래(또는 그려 둔 땅선)가 바닥이에요. 테두리만 그린 모양은 꽉 찬 블록이 돼요. 여러 장을 고르면 순서대로 이어 붙여요.</p>
+      <p>흰 종이에 그리고 종이만 보이게 찍어 주세요. 큐브는 왼쪽에서 오른쪽으로 달리고, 그림 맨 아래(또는 그려 둔 땅선)가 바닥이에요. 테두리만 그린 모양은 꽉 찬 블록이 되고, 연필로 그린 지그재그는 가시가 돼요. 여러 장을 고르면 순서대로 이어 붙여요.</p>
       <label class="pickbtn">그림 고르기 · 사진 찍기<input type="file" id="mkFile" accept="image/*" multiple></label>
       <div class="mk-row">
         <label>맵 이름 <input id="mkName" maxlength="20" value="내 그림 맵"></label>
-        <label>간격 <select id="mkGap"><option value="2">좁게</option><option value="3" selected>보통</option><option value="4">넓게</option></select></label>
+        <label>길이 <select id="mkGap"><option value="1">짧게</option><option value="1.5" selected>보통</option><option value="2">길게</option></select></label>
       </div>
       <div class="shots" id="mkShots"></div>
       <div class="pv" id="mkPvBox" hidden><canvas id="mkPv"></canvas></div>
