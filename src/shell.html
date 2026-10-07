@@ -1,0 +1,66 @@
+<title>Neon Cube Run</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Do+Hyeon&family=IBM+Plex+Sans+KR:wght@400;600&display=swap">
+<style>
+/* Layout: one-screen arcade cabinet — slim header, full-bleed canvas stage, control hint footer. Single dark theme by choice. */
+:root{
+  --night:#170d2b; --dusk:#2a1647; --coral:#ff6a4d; --gold:#ffc94a; --mint:#3fe3c3; --ink:#f4ecff; --mute:#a593c4;
+  --display:"Bungee","Do Hyeon",system-ui,sans-serif; --kr:"Do Hyeon","IBM Plex Sans KR",system-ui,sans-serif; --body:"IBM Plex Sans KR",system-ui,sans-serif;
+  color-scheme:dark;
+}
+html,body{height:100%}
+[hidden]{display:none!important}
+body{background:var(--night);color:var(--ink);font-family:var(--body);margin:0;overflow:hidden}
+.app{height:100%;display:flex;flex-direction:column;padding-inline:16px;padding-block:10px;box-sizing:border-box;gap:10px;max-width:1100px;margin:0 auto}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+h1{font-family:var(--display);font-weight:400;font-size:clamp(18px,4vw,26px);margin:0;letter-spacing:.02em;color:var(--gold);text-shadow:0 0 14px rgba(255,106,77,.55)}
+.stats{display:flex;gap:14px;font-variant-numeric:tabular-nums;font-size:13px;color:var(--mute)}
+.stats b{color:var(--ink);font-weight:600}
+button.mute{font:inherit;font-size:12px;background:transparent;color:var(--ink);border:1px solid var(--mute);border-radius:999px;padding:4px 12px;cursor:pointer}
+button.mute:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.stage{position:relative;flex:1;min-height:0;border-radius:14px;overflow:hidden;background:var(--dusk);touch-action:none;user-select:none;-webkit-user-select:none}
+canvas{display:block;width:100%;height:100%}
+.overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;pointer-events:none;padding:16px}
+.overlay h2{font-family:var(--kr);font-weight:400;font-size:clamp(30px,7vw,54px);margin:0;color:var(--ink);text-shadow:0 0 18px rgba(63,227,195,.6);text-wrap:balance}
+.overlay p{margin:0;color:var(--ink);opacity:.85;font-size:15px}
+.levels{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;pointer-events:auto;margin-top:6px}
+.levels button{font-family:var(--kr);font-size:18px;color:var(--ink);background:rgba(23,13,43,.75);border:2px solid var(--mute);border-radius:12px;padding:10px 16px;cursor:pointer;min-width:140px;display:flex;flex-direction:column;align-items:center;gap:2px}
+.levels button small{font-family:var(--body);font-size:11.5px;color:var(--mute)}
+.levels button[aria-pressed="true"]{border-color:var(--gold);box-shadow:0 0 14px rgba(255,201,74,.45)}
+.levels button:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
+.overlay .tap{font-family:var(--display);font-size:14px;color:var(--gold);letter-spacing:.12em;animation:blink 1.1s steps(2) infinite}
+@keyframes blink{50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.levels{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;pointer-events:auto;margin-top:6px}
+.levels button{font-family:var(--kr);font-size:18px;color:var(--ink);background:rgba(23,13,43,.75);border:2px solid var(--mute);border-radius:12px;padding:10px 16px;cursor:pointer;min-width:140px;display:flex;flex-direction:column;align-items:center;gap:2px}
+.levels button small{font-family:var(--body);font-size:11.5px;color:var(--mute)}
+.levels button[aria-pressed="true"]{border-color:var(--gold);box-shadow:0 0 14px rgba(255,201,74,.45)}
+.levels button:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
+.overlay .tap{animation:none}}
+footer{font-size:12.5px;color:var(--mute);text-align:center}
+kbd{font-family:var(--body);border:1px solid var(--mute);border-radius:4px;padding:0 5px;color:var(--ink)}
+</style>
+<div class="app">
+  <header>
+    <h1>NEON CUBE RUN</h1>
+    <div class="stats">
+      <span>시도 <b id="att">1</b></span>
+      <span>진행 <b id="pct">0%</b></span>
+      <span>최고 <b id="best">0%</b></span>
+    </div>
+    <div class="stats"><button class="mute" id="menu" type="button">레벨 선택</button><button class="mute" id="mute" type="button">사운드 켜짐</button></div>
+  </header>
+  <div class="stage" id="stage">
+    <canvas id="cv"></canvas>
+    <div class="overlay" id="ov">
+      <h2 id="ovTitle">네온 큐브 런</h2>
+      <p id="ovSub">레벨을 고르고 화면을 탭하세요. 가시를 피해 끝까지!</p>
+      <div class="levels" id="levels">
+        <button type="button" data-lv="0" aria-pressed="true">1. 네온 시티<small id="b0">최고 0%</small></button>
+        <button type="button" data-lv="1" aria-pressed="false">2. 레이저 괴물<small id="b1">최고 0%</small></button>
+      </div>
+      <div class="tap" id="ovTap">TAP TO START</div>
+    </div>
+  </div>
+  <footer>탭·클릭·<kbd>Space</kbd>·<kbd>↑</kbd> 점프 · 누르고 있으면 착지하자마자 연속 점프 · 노란 패드는 높이 튕겨줍니다 · 괴물 레이저: 낮으면 점프, 높으면 그대로 달리기</footer>
+</div>
+<script>

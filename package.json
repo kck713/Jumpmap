@@ -1,0 +1,12 @@
+{
+  "name": "neon-cube-run",
+  "version": "0.3.0",
+  "private": true,
+  "description": "지오메트리 대시 스타일 원터치 점프 리듬 러너 (HTML5 Canvas, 의존성 없음)",
+  "scripts": {
+    "build": "node tools/build.js",
+    "verify": "node tools/verify-levels.js",
+    "check": "npm run verify && npm run build",
+    "serve": "npx --yes http-server -c-1 -p 8080 ."
+  }
+}
