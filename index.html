@@ -55,7 +55,21 @@ canvas{display:block;width:100%;height:100%}
 .rules li{display:flex;align-items:center;gap:8px;background:var(--dusk);border-radius:10px;padding:8px 10px;font-size:14px}
 .rules i{width:22px;height:22px;border-radius:6px;background:var(--c);flex:none;border:1px solid rgba(244,236,255,.3)}
 .maker p{margin:0;font-size:14px;color:var(--mute);line-height:1.5}
-.pickbtn{position:relative;display:block;text-align:center;font-family:var(--kr);font-size:20px;color:var(--night);background:var(--mint);border-radius:12px;padding:14px;cursor:pointer}
+.pick-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.pickbtn{position:relative;display:block;border:0;width:100%;text-align:center;font-family:var(--kr);font-size:20px;color:var(--night);background:var(--mint);border-radius:12px;padding:14px;cursor:pointer}
+.pickbtn.alt{background:var(--dusk);color:var(--ink);border:2px solid var(--mint)}
+.cam{position:fixed;inset:0;z-index:20;background:#000;display:flex;flex-direction:column;color:var(--ink)}
+.cam-msg{margin:0;padding:calc(env(safe-area-inset-top,0px) + 12px) 16px 12px;text-align:center;font-family:var(--kr);font-size:20px}
+.cam-view{position:relative;flex:1;min-height:0}
+.cam-view video,.cam-view canvas,.cam-flash{position:absolute;inset:0;width:100%;height:100%}
+.cam-view video{object-fit:contain}
+.cam-flash{background:#fff;opacity:0;pointer-events:none;transition:opacity .25s}
+.cam-bar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;padding:14px 16px calc(env(safe-area-inset-bottom,0px) + 14px)}
+.cam-bar .mute{justify-self:start}
+.cam-tip{font-size:12px;color:var(--mute);text-align:right}
+.shutter{width:68px;height:68px;border-radius:50%;background:var(--ink);border:5px solid var(--night);box-shadow:0 0 0 3px var(--ink);cursor:pointer}
+.shutter:focus-visible,.cam .mute:focus-visible{outline:2px solid var(--gold);outline-offset:4px}
+@media (prefers-reduced-motion:reduce){.cam-flash{transition:none}}
 .pickbtn input{position:absolute;inset:0;opacity:0;width:100%;cursor:pointer}
 .mk-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .mk-row label{display:flex;align-items:center;gap:6px;font-size:14px}
@@ -81,6 +95,10 @@ canvas{display:block;width:100%;height:100%}
 .maker button.act{font-family:var(--kr);font-size:18px;color:var(--ink);background:var(--dusk);border:2px solid var(--mute);border-radius:12px;padding:8px 16px;cursor:pointer}
 .maker button.act.go{background:var(--gold);color:var(--night);border-color:var(--gold)}
 .maker button.act:disabled{opacity:.4;cursor:default}
+.legend{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px!important}
+.legend span{display:inline-block;width:14px;height:14px;box-sizing:border-box}
+.lg-pad{border:2px solid var(--gold);border-radius:50%}
+.lg-cut{border:1.5px dashed var(--coral);margin-left:8px}
 #mkLink{width:100%;box-sizing:border-box;font-size:13px}
 footer{font-size:12.5px;color:var(--mute);text-align:center}
 kbd{font-family:var(--body);border:1px solid var(--mute);border-radius:4px;padding:0 5px;color:var(--ink)}
@@ -119,7 +137,10 @@ kbd{font-family:var(--body);border:1px solid var(--mute);border-radius:4px;paddi
         <li><i style="--c:#bcd7f2"></i><span><b>연한 색</b> 꾸미기</span></li>
       </ul>
       <p>흰 종이에 그리고 종이만 보이게 찍어 주세요. 큐브는 왼쪽에서 오른쪽으로 달리고, 그림 맨 아래(또는 그려 둔 땅선)가 바닥이에요. 테두리만 그린 모양은 꽉 찬 블록이 되고, 연필로 그린 지그재그는 가시가 돼요. 여러 장을 고르면 순서대로 이어 붙여요.</p>
-      <label class="pickbtn">그림 고르기 · 사진 찍기<input type="file" id="mkFile" accept="image/*" multiple></label>
+      <div class="pick-row">
+        <button class="pickbtn" id="mkCam" type="button">카메라로 찍기</button>
+        <label class="pickbtn alt">사진 고르기<input type="file" id="mkFile" accept="image/*" multiple></label>
+      </div>
       <div class="mk-row">
         <label>맵 이름 <input id="mkName" maxlength="20" value="내 그림 맵"></label>
         <label>길이 <select id="mkGap"><option value="1">짧게</option><option value="1.5" selected>보통</option><option value="2">길게</option></select></label>
@@ -140,13 +161,23 @@ kbd{font-family:var(--body);border:1px solid var(--mute);border-radius:4px;paddi
         <div class="edbox" id="mkEdBox"><canvas id="mkEd"></canvas></div>
       </div>
       <div class="pv" id="mkPvBox" hidden><canvas id="mkPv"></canvas></div>
+      <p class="legend" id="mkLegend" hidden><span class="lg-pad"></span>새로 놓은 점프 패드 <span class="lg-cut"></span>낮추거나 치운 곳</p>
       <p class="msg" id="mkMsg" role="status"></p>
       <div class="mk-row">
-        <button class="act" id="mkFix" type="button" hidden>자동으로 고치기</button>
         <button class="act go" id="mkPlay" type="button" disabled>플레이!</button>
         <button class="act" id="mkShare" type="button" disabled>링크 공유</button>
+        <button class="act" id="mkMore" type="button" hidden>한 장 더 이어 찍기</button>
       </div>
       <input id="mkLink" readonly hidden aria-label="공유 링크">
+    </div>
+  </section>
+  <section class="cam" id="cam" hidden aria-label="종이 찍기">
+    <p class="cam-msg" id="camMsg" role="status">종이를 테두리 안에 맞춰 주세요</p>
+    <div class="cam-view"><video id="camVideo" playsinline muted autoplay></video><canvas id="camOver"></canvas><div class="cam-flash" id="camFlash"></div></div>
+    <div class="cam-bar">
+      <button class="mute" id="camClose" type="button">닫기</button>
+      <button class="shutter" id="camShot" type="button" aria-label="직접 찍기"></button>
+      <span class="cam-tip">종이가 테두리 안에 들어오면 자동으로 찍어요</span>
     </div>
   </section>
   <footer>탭·클릭·<kbd>Space</kbd>·<kbd>↑</kbd> 점프 · 누르고 있으면 착지하자마자 연속 점프 · 노란 패드는 높이 튕겨줍니다 · 괴물 레이저: 낮으면 점프, 높으면 그대로 달리기</footer>
@@ -531,29 +562,60 @@ function columnsToLevel(parts, stretch = 1, name = '내 그림 맵') {
   return { objs: o.sort((a, b) => a.x - b.x), end: x + DRAW.tail, name, boss: false, colX };
 }
 
-// 깰 수 없으면 가장 멀리 간 사망 지점의 장애물을 하나씩 낮추거나 치운다
-function autoFix(L, max = 60) {
-  const M = { ...L, objs: L.objs.map(o => ({ ...o })) };
-  let n = 0, r = solveLevel(M);
-  while (!r.path && r.dead && n < max) {
-    const d = r.dead, a = CFG.inset, px0 = d.x + a, px1 = d.x + 1 - a, py0 = d.y, py1 = d.y + 1 - a;
-    let bi = -1, bd = Infinity;
-    M.objs.forEach((o, i) => {
-      if (o.t === 'p' || o.t === 'L') return;
-      const top = o.t === 'b' ? o.y + o.h : o.y + 1;
-      if (o.t === 'b' && Math.abs(py0 - top) < 1e-6) return; // 밟고 서 있던 블록
-      const dx = Math.max(o.x - px1, px0 - o.x - (o.w || 1), 0), dy = Math.max(o.y - py1, py0 - top, 0);
-      if (dx * dx + dy * dy < bd) { bd = dx * dx + dy * dy; bi = i; }
-    });
-    if (bi < 0) break;
-    const o = M.objs[bi];
-    if (o.t === 'b' && o.h > 1 && o.y <= d.y) {
-      const top = o.y + o.h; o.h--;
-      for (const q of M.objs) if (q.t !== 'b' && !q.d && q.y === top && q.x >= o.x && q.x < o.x + o.w) q.y--;
-    } else M.objs.splice(bi, 1);
-    n++; r = solveLevel(M);
+// 아이 그림을 자동 러너로 깰 수 있는 맵으로 바꾼다. 막힌 곳마다 그림을 덜 바꾸는 방법부터 시도한다:
+//   1) 벽 앞에 점프 패드 놓기 (더 멀리 가게 되면 채택)
+//   2) 블록 1칸 낮추기 (나빠지지 않으면 채택: 다음 차례에 다시 패드를 시도한다)
+//   3) 치우기
+// changes: 바꾼 내용 목록 (미리보기에 표시). { t: 'pad'|'lower'|'remove', o: 바꾸기 전 오브젝트, x, y }
+function deathCulprit(M, d) {
+  const a = CFG.inset, px0 = d.x + a, px1 = d.x + 1 - a, py0 = d.y, py1 = d.y + 1 - a;
+  let bi = -1, bd = Infinity;
+  M.objs.forEach((o, i) => {
+    if (o.t === 'p' || o.t === 'L') return;
+    const top = o.t === 'b' ? o.y + o.h : o.y + 1;
+    if (o.t === 'b' && Math.abs(py0 - top) < 1e-6) return; // 밟고 서 있던 블록
+    const dx = Math.max(o.x - px1, px0 - o.x - (o.w || 1), 0), dy = Math.max(o.y - py1, py0 - top, 0);
+    if (dx * dx + dy * dy < bd) { bd = dx * dx + dy * dy; bi = i; }
+  });
+  return bi;
+}
+// 벽 o 앞 k칸에 패드를 놓을 수 있으면 패드를 만든다 (벽 밑동과 같은 높이의 바닥이 있어야 함)
+function padBefore(M, o, k) {
+  const x = o.x - k, y = o.y;
+  if (x < 2) return null;
+  for (const q of M.objs) {
+    const qx1 = q.x + (q.w || 1); if (q.x >= x + 1 || qx1 <= x) continue;
+    const qy0 = q.y, qy1 = q.t === 'b' ? q.y + q.h : q.y + 1;
+    if (qy1 > y + 1e-6 && qy0 < y + 3) return null;                         // 그 자리(와 위 공간)가 막혀 있음
   }
-  return { L: M, fixes: n, ok: !!r.path, res: r };
+  if (y > 0 && !M.objs.some(q => q.t === 'b' && q.x <= x && q.x + q.w >= x + 1 && q.y + q.h === y)) return null; // 밟을 바닥 없음
+  return { t: 'p', x, y };
+}
+function autoFix(L, max = 80) {
+  const M = { ...L, objs: L.objs.map(o => ({ ...o })) }, changes = [];
+  const sort = () => M.objs.sort((p, q) => p.x - q.x);
+  let r = solveLevel(M);
+  while (!r.path && r.dead && changes.length < max) {
+    const bi = deathCulprit(M, r.dead); if (bi < 0) break;
+    const o = M.objs[bi], was = { ...o }, wall = o.t === 'b' && o.y <= r.dead.y + 1e-6;
+    let done = false;
+    if (wall) for (const k of [3, 2, 4, 5]) {                                  // 1) 점프 패드
+      const pad = padBefore(M, o, k); if (!pad) continue;
+      M.objs.push(pad); sort();
+      const r2 = solveLevel(M);
+      if (r2.path || (r2.dead && r2.dead.x > r.dead.x + .3)) { changes.push({ t: 'pad', x: pad.x, y: pad.y }); r = r2; done = true; break; }
+      M.objs.splice(M.objs.indexOf(pad), 1);
+    }
+    if (!done && wall && o.h > 1) {                                            // 2) 1칸 낮추기
+      const top = o.y + o.h, moved = M.objs.filter(q => q.t !== 'b' && !q.d && q.y === top && q.x >= o.x && q.x < o.x + o.w);
+      o.h--; for (const q of moved) q.y--;
+      const r2 = solveLevel(M);
+      if (r2.path || !r2.dead || r2.dead.x >= r.dead.x - 1e-6) { changes.push({ t: 'lower', o: was }); r = r2; done = true; }
+      else { o.h++; for (const q of moved) q.y++; }
+    }
+    if (!done) { M.objs.splice(M.objs.indexOf(o), 1); changes.push({ t: 'remove', o: was }); r = solveLevel(M); } // 3) 치우기
+  }
+  return { L: M, fixes: changes.length, changes, ok: !!r.path, res: r };
 }
 
 // 공유 링크용 문자열: 1~이름~끝~b x.y.w.h_s x.y_v x.y(매달린 가시)_p x.y ...
@@ -703,7 +765,7 @@ function win() {
 
 // --- 그림 → 맵 만들기 ---
 const maker = $('maker'), mkMsg = $('mkMsg');
-let mkShots = [], mkLevel = null, mkRes = null;
+let mkShots = [], mkLevel = null, mkRes = null, mkChanges = [];
 const say = (t, bad) => { mkMsg.textContent = t; mkMsg.classList.toggle('bad', !!bad); };
 function setCustom(M) {
   custom = M; bests[CUSTOM] = 0;
@@ -715,6 +777,7 @@ function openMaker() {
   state = 'maker'; maker.hidden = false; $('mkClose').focus();
 }
 function closeMaker() {
+  closeCam();
   maker.hidden = true; p = newPlayer(); showMenu('네온 큐브 런', '레벨을 고르고 화면을 탭하세요. 가시를 피해 끝까지!');
 }
 for (const id of ['makeBtn', 'mkClose']) $(id).addEventListener('pointerdown', e => e.stopPropagation());
@@ -726,23 +789,98 @@ maker.addEventListener('keydown', e => { if (e.key === 'Escape') closeMaker(); }
 const PH = 480, SRC = 1600;
 async function readDrawing(file) {
   const url = URL.createObjectURL(file), img = new Image();
-  try {
-    img.src = url; await img.decode();
-    const k = Math.min(1, SRC / Math.max(img.naturalWidth, img.naturalHeight));
-    const sw = Math.round(img.naturalWidth * k), sh = Math.round(img.naturalHeight * k);
-    const src = document.createElement('canvas'); src.width = sw; src.height = sh;
-    const sx = src.getContext('2d', { willReadFrequently: true });
-    sx.fillStyle = '#fff'; sx.fillRect(0, 0, sw, sh); sx.drawImage(img, 0, 0, sw, sh);
-    const sd = sx.getImageData(0, 0, sw, sh).data;
-    const q = findPaper(sd, sw, sh) || [[0, 0], [sw - 1, 0], [sw - 1, sh - 1], [0, sh - 1]];
-    const pw = (dist(q[0], q[1]) + dist(q[3], q[2])) / 2, ph = (dist(q[0], q[3]) + dist(q[1], q[2])) / 2;
-    const w = Math.max(8, Math.min(PH * 10, Math.round(pw * PH / ph)));
-    const c = document.createElement('canvas'); c.width = w; c.height = PH;
-    const data = warpQuad(sd, sw, sh, q, w, PH);
-    c.getContext('2d').putImageData(new ImageData(data, w, PH), 0, 0);
-    return { canvas: c, data, w, a: null }; // 분석은 rebuild에서 (길이 옵션을 바꿔도 다시 분석)
-  } finally { URL.revokeObjectURL(url); }
+  try { img.src = url; await img.decode(); return fromImage(img, img.naturalWidth, img.naturalHeight); }
+  finally { URL.revokeObjectURL(url); }
 }
+// 이미지(또는 카메라에서 찍은 캔버스) → 종이를 찾아 높이 PH로 편 그림
+function fromImage(src0, iw, ih) {
+  const k = Math.min(1, SRC / Math.max(iw, ih));
+  const sw = Math.round(iw * k), sh = Math.round(ih * k);
+  const src = document.createElement('canvas'); src.width = sw; src.height = sh;
+  const sx = src.getContext('2d', { willReadFrequently: true });
+  sx.fillStyle = '#fff'; sx.fillRect(0, 0, sw, sh); sx.drawImage(src0, 0, 0, sw, sh);
+  const sd = sx.getImageData(0, 0, sw, sh).data;
+  const q = findPaper(sd, sw, sh) || [[0, 0], [sw - 1, 0], [sw - 1, sh - 1], [0, sh - 1]];
+  const pw = (dist(q[0], q[1]) + dist(q[3], q[2])) / 2, ph = (dist(q[0], q[3]) + dist(q[1], q[2])) / 2;
+  const w = Math.max(8, Math.min(PH * 10, Math.round(pw * PH / ph)));
+  const c = document.createElement('canvas'); c.width = w; c.height = PH;
+  const data = warpQuad(sd, sw, sh, q, w, PH);
+  c.getContext('2d').putImageData(new ImageData(data, w, PH), 0, 0);
+  return { canvas: c, data, w, a: null, edits: [], undo: [] }; // 분석은 rebuild에서 (길이 옵션을 바꿔도 다시 분석)
+}
+
+// --- 카메라: 종이가 테두리 안에 들어와 잠깐 가만히 있으면 자동으로 찍는다 ---
+const camVideo = $('camVideo'), camOver = $('camOver'), CAM_NEED = 7; // 0.15초 × 7 ≈ 1초
+let camStream = null, camTimer = 0, camAppend = false, camStable = 0, camPrev = null, camBusy = false;
+if (!navigator.mediaDevices?.getUserMedia) $('mkCam').hidden = true;
+async function openCam(append) {
+  camAppend = append;
+  try { camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false }); }
+  catch (e) { say('카메라를 열지 못했어요. 브라우저에서 카메라를 허용하거나 "사진 고르기"로 올려 주세요.', true); return; }
+  $('cam').hidden = false; camVideo.srcObject = camStream; camVideo.play().catch(() => {});
+  camStable = 0; camPrev = null; camBusy = false; $('camMsg').textContent = '종이를 테두리 안에 맞춰 주세요';
+  camTimer = setInterval(camTick, 150); $('camClose').focus();
+}
+function closeCam() {
+  clearInterval(camTimer); camStream?.getTracks().forEach(t => t.stop()); camStream = null;
+  camVideo.srcObject = null; $('cam').hidden = true;
+}
+// 테두리: 화면 안에 A4 가로 비율(1.414:1) 상자
+const guideOf = (w, h) => { const gw = Math.min(w * .88, h * .88 * 1.414), gh = gw / 1.414; return { x: (w - gw) / 2, y: (h - gh) / 2, w: gw, h: gh }; };
+const quadArea = q => Math.abs(q.reduce((s, p, i) => { const n = q[(i + 1) % 4]; return s + p[0] * n[1] - n[0] * p[1]; }, 0)) / 2;
+const camSmall = document.createElement('canvas');
+function camTick() {
+  const vw = camVideo.videoWidth, vh = camVideo.videoHeight; if (!vw || camBusy) return;
+  const k = 320 / Math.max(vw, vh), w = Math.round(vw * k), h = Math.round(vh * k);
+  camSmall.width = w; camSmall.height = h;
+  const x = camSmall.getContext('2d', { willReadFrequently: true }); x.drawImage(camVideo, 0, 0, w, h);
+  const q = findPaper(x.getImageData(0, 0, w, h).data, w, h), g = guideOf(w, h), tol = g.w * .07;
+  const inside = q && q.every(([px, py]) => px > g.x - tol && px < g.x + g.w + tol && py > g.y - tol && py < g.y + g.h + tol);
+  const big = q && quadArea(q) > g.w * g.h * .45;
+  const still = q && camPrev && q.every((p, i) => dist(p, camPrev[i]) < g.w * .025);
+  camStable = inside && big ? (still ? camStable + 1 : 1) : 0; camPrev = q;
+  $('camMsg').textContent = !q ? '종이를 테두리 안에 맞춰 주세요' : !inside ? '종이가 테두리 안에 다 들어오게 해 주세요'
+    : !big ? '조금 더 가까이 와 주세요' : '좋아요, 그대로 가만히…';
+  drawCamOverlay(q, g, w, h, inside && big);
+  if (camStable >= CAM_NEED) capture();
+}
+function drawCamOverlay(q, g, w, h, ok) {
+  const bw = camOver.clientWidth, bh = camOver.clientHeight, r = Math.min(devicePixelRatio || 1, 2);
+  camOver.width = bw * r; camOver.height = bh * r;
+  const x = camOver.getContext('2d'); x.setTransform(r, 0, 0, r, 0, 0);
+  const sc = Math.min(bw / w, bh / h), ox = (bw - w * sc) / 2, oy = (bh - h * sc) / 2, P = (px, py) => [ox + px * sc, oy + py * sc];
+  // 테두리 밖은 어둡게
+  x.fillStyle = 'rgba(0,0,0,.45)'; x.fillRect(0, 0, bw, bh);
+  const [gx, gy] = P(g.x, g.y); x.clearRect(gx, gy, g.w * sc, g.h * sc);
+  x.strokeStyle = ok ? COL.gold : COL.ink; x.lineWidth = 3; x.setLineDash(ok ? [] : [10, 8]); x.strokeRect(gx, gy, g.w * sc, g.h * sc); x.setLineDash([]);
+  if (q) {
+    x.strokeStyle = ok ? COL.mint : COL.coral; x.lineWidth = 3; x.beginPath();
+    q.forEach((p, i) => { const [a, b] = P(p[0], p[1]); i ? x.lineTo(a, b) : x.moveTo(a, b); }); x.closePath(); x.stroke();
+  }
+  if (ok) { // 찍힐 때까지 남은 시간
+    x.strokeStyle = COL.gold; x.lineWidth = 6; x.beginPath();
+    x.arc(gx + g.w * sc / 2, gy + g.h * sc / 2, 28, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, camStable / CAM_NEED)); x.stroke();
+  }
+}
+function capture() {
+  const vw = camVideo.videoWidth, vh = camVideo.videoHeight; if (!vw || camBusy) return;
+  camBusy = true;
+  const c = document.createElement('canvas'); c.width = vw; c.height = vh; c.getContext('2d').drawImage(camVideo, 0, 0);
+  if (!reduce) { const f = $('camFlash'); f.style.opacity = '.8'; setTimeout(() => { f.style.opacity = '0'; }, 120); }
+  setTimeout(() => {
+    closeCam();
+    const shot = fromImage(c, vw, vh);
+    mkShots = camAppend ? [...mkShots, shot] : [shot]; mkSel = mkShots.length - 1;
+    say('그림을 읽는 중이에요…'); rebuild();
+    if (!mkLevel) say('그림에서 선을 찾지 못했어요. 진한 펜으로 그리고 밝은 곳에서 다시 찍어 주세요.', true);
+  }, reduce ? 0 : 260);
+}
+$('mkCam').addEventListener('click', () => openCam(false));
+$('mkMore').addEventListener('click', () => openCam(true));
+$('camShot').addEventListener('click', capture);
+$('camClose').addEventListener('click', closeCam);
+$('cam').addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); closeCam(); } });
+
 // 사진 위에 어떻게 읽었는지 칸 색으로 표시 (여러 장일 때 고를 수 있는 작은 그림)
 const CELL = [, 'rgba(63,227,195,.5)', 'rgba(255,106,77,.6)', 'rgba(255,201,74,.65)'];
 function shotView({ canvas, a }, i) {
@@ -837,7 +975,7 @@ $('mkReset').addEventListener('click', () => {
 });
 addEventListener('resize', () => { if (!maker.hidden) drawEditor(); });
 
-function drawPreview(M, res) {
+function drawPreview(M, res, changes = []) {
   const pc = $('mkPv'), ts = Math.max(10, Math.min(24, Math.floor($('mkPvBox').clientWidth / (M.end + 2)))), r = Math.min(devicePixelRatio || 1, 2);
   let top = 5; for (const o of M.objs) top = Math.max(top, (o.t === 'b' ? o.y + o.h : o.y + 1) + 2);
   const w = Math.ceil((M.end + 2) * ts), h = (top + 1) * ts;
@@ -853,6 +991,16 @@ function drawPreview(M, res) {
     else if (o.t === 'p') { x.fillStyle = COL.gold; x.fillRect(ox + 1, Y(o.y + .3), ts - 2, ts * .3); }
     else if (o.t === 'k') { x.fillStyle = COL.gold; x.beginPath(); x.arc(ox + ts / 2, Y(o.y + .5), ts * .36, 0, Math.PI * 2); x.fill(); }
   }
+  // 자동 변환으로 바꾼 곳: 치우거나 낮춘 칸은 빨간 점선, 새 점프 패드는 노란 동그라미
+  x.save(); x.strokeStyle = COL.coral; x.lineWidth = 1.5; x.setLineDash([3, 3]);
+  for (const c of changes) {
+    const o = c.o;
+    if (c.t === 'remove') x.strokeRect(o.x * ts + 1, Y(o.t === 'b' ? o.y + o.h : o.y + 1) + 1, (o.w || 1) * ts - 2, (o.t === 'b' ? o.h : 1) * ts - 2);
+    else if (c.t === 'lower') x.strokeRect(o.x * ts + 1, Y(o.y + o.h) + 1, o.w * ts - 2, ts - 2);
+  }
+  x.setLineDash([]); x.strokeStyle = COL.gold; x.lineWidth = 2;
+  for (const c of changes) if (c.t === 'pad') { x.beginPath(); x.arc(c.x * ts + ts / 2, Y(c.y + .2), ts * .75, 0, Math.PI * 2); x.stroke(); }
+  x.restore();
   for (let j = 0; j < top; j++) { x.fillStyle = j % 2 ? COL.ink : COL.night; x.fillRect(M.end * ts, Y(j + 1), ts * .4, ts); }
   x.fillStyle = COL.mint; x.fillRect(1, Y(1), ts, ts);
   if (res.path) { x.fillStyle = COL.gold; for (const jx of res.path) { x.beginPath(); x.moveTo(jx * ts + ts / 2, gy + 2); x.lineTo(jx * ts + ts / 2 - 3, gy + 8); x.lineTo(jx * ts + ts / 2 + 3, gy + 8); x.fill(); } }
@@ -863,22 +1011,27 @@ function drawPreview(M, res) {
     const box = $('mkPvBox'); box.scrollLeft = dx - box.clientWidth / 2;
   }
 }
-function showResult(fixes) {
-  mkRes = solveLevel(mkLevel);
-  $('mkPvBox').hidden = false; drawPreview(mkLevel, mkRes);
-  $('mkPlay').disabled = false; $('mkShare').disabled = !mkRes.path; $('mkFix').hidden = !!mkRes.path; $('mkLink').hidden = true;
-  // 막힌 지점을 그림의 칸으로 되돌려 찾는다 (큐브 앞쪽 x를 덮는 열)
+// 그린 그대로 깰 수 없으면 자동 러너로 달릴 수 있게 자동으로 바꾼다 (autoFix)
+function showResult() {
+  mkRes = solveLevel(mkLevel); mkChanges = [];
+  if (!mkRes.path) { const f = autoFix(mkLevel); mkLevel = f.L; mkChanges = f.changes; mkRes = f.res; }
+  $('mkPvBox').hidden = false; drawPreview(mkLevel, mkRes, mkChanges);
+  $('mkLegend').hidden = !mkChanges.length;
+  $('mkPlay').disabled = false; $('mkShare').disabled = !mkRes.path; $('mkLink').hidden = true; $('mkMore').hidden = $('mkCam').hidden; // 카메라가 있으면 이어 찍기
+  // 변환해도 막히면(드묾) 막힌 지점을 그림의 칸으로 되돌려 찾는다 (큐브 앞쪽 x를 덮는 열)
   mkDead = null;
   if (!mkRes.path && mkRes.dead && mkLevel.colX) {
-    const fx = mkRes.dead.x + 1.3; let best = -Infinity; // 큐브 앞면이 닿은 장애물 칸
+    const fx = mkRes.dead.x + 1.3; let best = -Infinity;
     mkLevel.colX.forEach((xs, pi) => xs.forEach((x, c) => { if (x !== null && x <= fx && x > best) { best = x; mkDead = { shot: mkParts[pi], c }; } }));
-    if (mkDead && !fixes) { mkSel = mkDead.shot; drawShots(); }
+    if (mkDead) { mkSel = mkDead.shot; drawShots(); }
   }
   drawEditor();
   if (mkDead && mkDead.shot === mkSel) { const a = cur().a; edBox.scrollLeft = (mkDead.c + .5) * a.cw * edScale - edBox.clientWidth / 2; }
-  const fixed = fixes ? `${fixes}군데를 고쳤어요. ` : '';
-  if (mkRes.path) say(`${fixed}완주할 수 있는 맵이에요! 점프 ${mkRes.path.length}번이면 깰 수 있어요.`);
-  else say(`${fixed}${Math.round(mkRes.dead ? mkRes.dead.x : mkRes.far)}칸 근처에서 막혀요. 빨간 줄 칸을 고치거나 '자동으로 고치기'를 눌러 보세요. 깰 수 있는 맵만 공유할 수 있어요.`, true);
+  const n = k => mkChanges.filter(c => c.t === k).length;
+  const what = [n('pad') && `점프 패드 ${n('pad')}개 놓기`, n('lower') && `${n('lower')}칸 낮추기`, n('remove') && `${n('remove')}개 치우기`].filter(Boolean).join(', ');
+  if (mkRes.path && !mkChanges.length) say(`그린 그대로 완주할 수 있어요! 점프 ${mkRes.path.length}번이면 깰 수 있어요.`);
+  else if (mkRes.path) say(`자동 러너로 달릴 수 있게 바꿨어요 (${what}). 점프 ${mkRes.path.length}번이면 깰 수 있어요.`);
+  else say(`${Math.round(mkRes.dead ? mkRes.dead.x : mkRes.far)}칸 근처에서 막혀요. 빨간 줄 칸을 고쳐 보세요. 깰 수 있는 맵만 공유할 수 있어요.`, true);
 }
 // 그림을 다시 읽고(길이 옵션이 바뀌어도) 아이가 고친 칸을 그 위에 다시 칠한다
 function analyze(s) {
@@ -892,7 +1045,7 @@ let mkParts = []; // 레벨의 몇 번째 장 → mkShots 인덱스
 function relevel() {
   mkParts = mkShots.map((s, i) => s.a ? i : -1).filter(i => i >= 0);
   drawShots();
-  if (!mkParts.length) { mkLevel = null; drawEditor(); $('mkPvBox').hidden = true; $('mkPlay').disabled = $('mkShare').disabled = true; $('mkFix').hidden = true; return; }
+  if (!mkParts.length) { mkLevel = null; drawEditor(); $('mkPvBox').hidden = true; $('mkPlay').disabled = $('mkShare').disabled = true; $('mkLegend').hidden = true; return; }
   mkLevel = columnsToLevel(mkParts.map(i => gridColumns(mkShots[i].a.g, mkShots[i].a.nc, mkShots[i].a.nr)), 1, $('mkName').value.trim() || '내 그림 맵');
   showResult(0);
 }
@@ -900,7 +1053,7 @@ function rebuild() { for (const s of mkShots) analyze(s); relevel(); edBox.scrol
 $('mkFile').addEventListener('change', async e => {
   const files = [...e.target.files]; if (!files.length) return;
   say('그림을 읽는 중이에요…');
-  try { mkShots = (await Promise.all(files.map(readDrawing))).map(s => ({ ...s, edits: [], undo: [] })); mkSel = 0; }
+  try { mkShots = await Promise.all(files.map(readDrawing)); mkSel = 0; }
   catch (err) { mkShots = []; say('그림 파일을 열지 못했어요. 사진(JPG, PNG)으로 다시 골라 주세요.', true); return; }
   finally { e.target.value = ''; }
   rebuild();
@@ -909,10 +1062,6 @@ $('mkFile').addEventListener('change', async e => {
 });
 $('mkGap').addEventListener('change', rebuild);
 $('mkName').addEventListener('input', () => { if (mkLevel) mkLevel.name = $('mkName').value.trim() || '내 그림 맵'; });
-$('mkFix').addEventListener('click', () => {
-  const f = autoFix(mkLevel); mkLevel = f.L; showResult(f.fixes);
-  if (!f.ok) say(`${f.fixes}군데를 고쳤지만 아직 막혀요. 그림을 조금 단순하게 다시 그려 볼까요?`, true);
-});
 $('mkPlay').addEventListener('click', () => {
   setCustom(mkLevel);
   try { history.replaceState(null, '', '#map=' + encodeLevel(mkLevel)); } catch (e) {}

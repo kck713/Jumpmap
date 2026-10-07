@@ -47,7 +47,21 @@ canvas{display:block;width:100%;height:100%}
 .rules li{display:flex;align-items:center;gap:8px;background:var(--dusk);border-radius:10px;padding:8px 10px;font-size:14px}
 .rules i{width:22px;height:22px;border-radius:6px;background:var(--c);flex:none;border:1px solid rgba(244,236,255,.3)}
 .maker p{margin:0;font-size:14px;color:var(--mute);line-height:1.5}
-.pickbtn{position:relative;display:block;text-align:center;font-family:var(--kr);font-size:20px;color:var(--night);background:var(--mint);border-radius:12px;padding:14px;cursor:pointer}
+.pick-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.pickbtn{position:relative;display:block;border:0;width:100%;text-align:center;font-family:var(--kr);font-size:20px;color:var(--night);background:var(--mint);border-radius:12px;padding:14px;cursor:pointer}
+.pickbtn.alt{background:var(--dusk);color:var(--ink);border:2px solid var(--mint)}
+.cam{position:fixed;inset:0;z-index:20;background:#000;display:flex;flex-direction:column;color:var(--ink)}
+.cam-msg{margin:0;padding:calc(env(safe-area-inset-top,0px) + 12px) 16px 12px;text-align:center;font-family:var(--kr);font-size:20px}
+.cam-view{position:relative;flex:1;min-height:0}
+.cam-view video,.cam-view canvas,.cam-flash{position:absolute;inset:0;width:100%;height:100%}
+.cam-view video{object-fit:contain}
+.cam-flash{background:#fff;opacity:0;pointer-events:none;transition:opacity .25s}
+.cam-bar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;padding:14px 16px calc(env(safe-area-inset-bottom,0px) + 14px)}
+.cam-bar .mute{justify-self:start}
+.cam-tip{font-size:12px;color:var(--mute);text-align:right}
+.shutter{width:68px;height:68px;border-radius:50%;background:var(--ink);border:5px solid var(--night);box-shadow:0 0 0 3px var(--ink);cursor:pointer}
+.shutter:focus-visible,.cam .mute:focus-visible{outline:2px solid var(--gold);outline-offset:4px}
+@media (prefers-reduced-motion:reduce){.cam-flash{transition:none}}
 .pickbtn input{position:absolute;inset:0;opacity:0;width:100%;cursor:pointer}
 .mk-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .mk-row label{display:flex;align-items:center;gap:6px;font-size:14px}
@@ -73,6 +87,10 @@ canvas{display:block;width:100%;height:100%}
 .maker button.act{font-family:var(--kr);font-size:18px;color:var(--ink);background:var(--dusk);border:2px solid var(--mute);border-radius:12px;padding:8px 16px;cursor:pointer}
 .maker button.act.go{background:var(--gold);color:var(--night);border-color:var(--gold)}
 .maker button.act:disabled{opacity:.4;cursor:default}
+.legend{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px!important}
+.legend span{display:inline-block;width:14px;height:14px;box-sizing:border-box}
+.lg-pad{border:2px solid var(--gold);border-radius:50%}
+.lg-cut{border:1.5px dashed var(--coral);margin-left:8px}
 #mkLink{width:100%;box-sizing:border-box;font-size:13px}
 footer{font-size:12.5px;color:var(--mute);text-align:center}
 kbd{font-family:var(--body);border:1px solid var(--mute);border-radius:4px;padding:0 5px;color:var(--ink)}
@@ -111,7 +129,10 @@ kbd{font-family:var(--body);border:1px solid var(--mute);border-radius:4px;paddi
         <li><i style="--c:#bcd7f2"></i><span><b>연한 색</b> 꾸미기</span></li>
       </ul>
       <p>흰 종이에 그리고 종이만 보이게 찍어 주세요. 큐브는 왼쪽에서 오른쪽으로 달리고, 그림 맨 아래(또는 그려 둔 땅선)가 바닥이에요. 테두리만 그린 모양은 꽉 찬 블록이 되고, 연필로 그린 지그재그는 가시가 돼요. 여러 장을 고르면 순서대로 이어 붙여요.</p>
-      <label class="pickbtn">그림 고르기 · 사진 찍기<input type="file" id="mkFile" accept="image/*" multiple></label>
+      <div class="pick-row">
+        <button class="pickbtn" id="mkCam" type="button">카메라로 찍기</button>
+        <label class="pickbtn alt">사진 고르기<input type="file" id="mkFile" accept="image/*" multiple></label>
+      </div>
       <div class="mk-row">
         <label>맵 이름 <input id="mkName" maxlength="20" value="내 그림 맵"></label>
         <label>길이 <select id="mkGap"><option value="1">짧게</option><option value="1.5" selected>보통</option><option value="2">길게</option></select></label>
@@ -132,13 +153,23 @@ kbd{font-family:var(--body);border:1px solid var(--mute);border-radius:4px;paddi
         <div class="edbox" id="mkEdBox"><canvas id="mkEd"></canvas></div>
       </div>
       <div class="pv" id="mkPvBox" hidden><canvas id="mkPv"></canvas></div>
+      <p class="legend" id="mkLegend" hidden><span class="lg-pad"></span>새로 놓은 점프 패드 <span class="lg-cut"></span>낮추거나 치운 곳</p>
       <p class="msg" id="mkMsg" role="status"></p>
       <div class="mk-row">
-        <button class="act" id="mkFix" type="button" hidden>자동으로 고치기</button>
         <button class="act go" id="mkPlay" type="button" disabled>플레이!</button>
         <button class="act" id="mkShare" type="button" disabled>링크 공유</button>
+        <button class="act" id="mkMore" type="button" hidden>한 장 더 이어 찍기</button>
       </div>
       <input id="mkLink" readonly hidden aria-label="공유 링크">
+    </div>
+  </section>
+  <section class="cam" id="cam" hidden aria-label="종이 찍기">
+    <p class="cam-msg" id="camMsg" role="status">종이를 테두리 안에 맞춰 주세요</p>
+    <div class="cam-view"><video id="camVideo" playsinline muted autoplay></video><canvas id="camOver"></canvas><div class="cam-flash" id="camFlash"></div></div>
+    <div class="cam-bar">
+      <button class="mute" id="camClose" type="button">닫기</button>
+      <button class="shutter" id="camShot" type="button" aria-label="직접 찍기"></button>
+      <span class="cam-tip">종이가 테두리 안에 들어오면 자동으로 찍어요</span>
     </div>
   </section>
   <footer>탭·클릭·<kbd>Space</kbd>·<kbd>↑</kbd> 점프 · 누르고 있으면 착지하자마자 연속 점프 · 노란 패드는 높이 튕겨줍니다 · 괴물 레이저: 낮으면 점프, 높으면 그대로 달리기</footer>

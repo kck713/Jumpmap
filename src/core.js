@@ -376,29 +376,60 @@ function columnsToLevel(parts, stretch = 1, name = '내 그림 맵') {
   return { objs: o.sort((a, b) => a.x - b.x), end: x + DRAW.tail, name, boss: false, colX };
 }
 
-// 깰 수 없으면 가장 멀리 간 사망 지점의 장애물을 하나씩 낮추거나 치운다
-function autoFix(L, max = 60) {
-  const M = { ...L, objs: L.objs.map(o => ({ ...o })) };
-  let n = 0, r = solveLevel(M);
-  while (!r.path && r.dead && n < max) {
-    const d = r.dead, a = CFG.inset, px0 = d.x + a, px1 = d.x + 1 - a, py0 = d.y, py1 = d.y + 1 - a;
-    let bi = -1, bd = Infinity;
-    M.objs.forEach((o, i) => {
-      if (o.t === 'p' || o.t === 'L') return;
-      const top = o.t === 'b' ? o.y + o.h : o.y + 1;
-      if (o.t === 'b' && Math.abs(py0 - top) < 1e-6) return; // 밟고 서 있던 블록
-      const dx = Math.max(o.x - px1, px0 - o.x - (o.w || 1), 0), dy = Math.max(o.y - py1, py0 - top, 0);
-      if (dx * dx + dy * dy < bd) { bd = dx * dx + dy * dy; bi = i; }
-    });
-    if (bi < 0) break;
-    const o = M.objs[bi];
-    if (o.t === 'b' && o.h > 1 && o.y <= d.y) {
-      const top = o.y + o.h; o.h--;
-      for (const q of M.objs) if (q.t !== 'b' && !q.d && q.y === top && q.x >= o.x && q.x < o.x + o.w) q.y--;
-    } else M.objs.splice(bi, 1);
-    n++; r = solveLevel(M);
+// 아이 그림을 자동 러너로 깰 수 있는 맵으로 바꾼다. 막힌 곳마다 그림을 덜 바꾸는 방법부터 시도한다:
+//   1) 벽 앞에 점프 패드 놓기 (더 멀리 가게 되면 채택)
+//   2) 블록 1칸 낮추기 (나빠지지 않으면 채택: 다음 차례에 다시 패드를 시도한다)
+//   3) 치우기
+// changes: 바꾼 내용 목록 (미리보기에 표시). { t: 'pad'|'lower'|'remove', o: 바꾸기 전 오브젝트, x, y }
+function deathCulprit(M, d) {
+  const a = CFG.inset, px0 = d.x + a, px1 = d.x + 1 - a, py0 = d.y, py1 = d.y + 1 - a;
+  let bi = -1, bd = Infinity;
+  M.objs.forEach((o, i) => {
+    if (o.t === 'p' || o.t === 'L') return;
+    const top = o.t === 'b' ? o.y + o.h : o.y + 1;
+    if (o.t === 'b' && Math.abs(py0 - top) < 1e-6) return; // 밟고 서 있던 블록
+    const dx = Math.max(o.x - px1, px0 - o.x - (o.w || 1), 0), dy = Math.max(o.y - py1, py0 - top, 0);
+    if (dx * dx + dy * dy < bd) { bd = dx * dx + dy * dy; bi = i; }
+  });
+  return bi;
+}
+// 벽 o 앞 k칸에 패드를 놓을 수 있으면 패드를 만든다 (벽 밑동과 같은 높이의 바닥이 있어야 함)
+function padBefore(M, o, k) {
+  const x = o.x - k, y = o.y;
+  if (x < 2) return null;
+  for (const q of M.objs) {
+    const qx1 = q.x + (q.w || 1); if (q.x >= x + 1 || qx1 <= x) continue;
+    const qy0 = q.y, qy1 = q.t === 'b' ? q.y + q.h : q.y + 1;
+    if (qy1 > y + 1e-6 && qy0 < y + 3) return null;                         // 그 자리(와 위 공간)가 막혀 있음
   }
-  return { L: M, fixes: n, ok: !!r.path, res: r };
+  if (y > 0 && !M.objs.some(q => q.t === 'b' && q.x <= x && q.x + q.w >= x + 1 && q.y + q.h === y)) return null; // 밟을 바닥 없음
+  return { t: 'p', x, y };
+}
+function autoFix(L, max = 80) {
+  const M = { ...L, objs: L.objs.map(o => ({ ...o })) }, changes = [];
+  const sort = () => M.objs.sort((p, q) => p.x - q.x);
+  let r = solveLevel(M);
+  while (!r.path && r.dead && changes.length < max) {
+    const bi = deathCulprit(M, r.dead); if (bi < 0) break;
+    const o = M.objs[bi], was = { ...o }, wall = o.t === 'b' && o.y <= r.dead.y + 1e-6;
+    let done = false;
+    if (wall) for (const k of [3, 2, 4, 5]) {                                  // 1) 점프 패드
+      const pad = padBefore(M, o, k); if (!pad) continue;
+      M.objs.push(pad); sort();
+      const r2 = solveLevel(M);
+      if (r2.path || (r2.dead && r2.dead.x > r.dead.x + .3)) { changes.push({ t: 'pad', x: pad.x, y: pad.y }); r = r2; done = true; break; }
+      M.objs.splice(M.objs.indexOf(pad), 1);
+    }
+    if (!done && wall && o.h > 1) {                                            // 2) 1칸 낮추기
+      const top = o.y + o.h, moved = M.objs.filter(q => q.t !== 'b' && !q.d && q.y === top && q.x >= o.x && q.x < o.x + o.w);
+      o.h--; for (const q of moved) q.y--;
+      const r2 = solveLevel(M);
+      if (r2.path || !r2.dead || r2.dead.x >= r.dead.x - 1e-6) { changes.push({ t: 'lower', o: was }); r = r2; done = true; }
+      else { o.h++; for (const q of moved) q.y++; }
+    }
+    if (!done) { M.objs.splice(M.objs.indexOf(o), 1); changes.push({ t: 'remove', o: was }); r = solveLevel(M); } // 3) 치우기
+  }
+  return { L: M, fixes: changes.length, changes, ok: !!r.path, res: r };
 }
 
 // 공유 링크용 문자열: 1~이름~끝~b x.y.w.h_s x.y_v x.y(매달린 가시)_p x.y ...

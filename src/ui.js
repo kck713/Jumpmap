@@ -122,7 +122,7 @@ function win() {
 
 // --- 그림 → 맵 만들기 ---
 const maker = $('maker'), mkMsg = $('mkMsg');
-let mkShots = [], mkLevel = null, mkRes = null;
+let mkShots = [], mkLevel = null, mkRes = null, mkChanges = [];
 const say = (t, bad) => { mkMsg.textContent = t; mkMsg.classList.toggle('bad', !!bad); };
 function setCustom(M) {
   custom = M; bests[CUSTOM] = 0;
@@ -134,6 +134,7 @@ function openMaker() {
   state = 'maker'; maker.hidden = false; $('mkClose').focus();
 }
 function closeMaker() {
+  closeCam();
   maker.hidden = true; p = newPlayer(); showMenu('네온 큐브 런', '레벨을 고르고 화면을 탭하세요. 가시를 피해 끝까지!');
 }
 for (const id of ['makeBtn', 'mkClose']) $(id).addEventListener('pointerdown', e => e.stopPropagation());
@@ -145,23 +146,98 @@ maker.addEventListener('keydown', e => { if (e.key === 'Escape') closeMaker(); }
 const PH = 480, SRC = 1600;
 async function readDrawing(file) {
   const url = URL.createObjectURL(file), img = new Image();
-  try {
-    img.src = url; await img.decode();
-    const k = Math.min(1, SRC / Math.max(img.naturalWidth, img.naturalHeight));
-    const sw = Math.round(img.naturalWidth * k), sh = Math.round(img.naturalHeight * k);
-    const src = document.createElement('canvas'); src.width = sw; src.height = sh;
-    const sx = src.getContext('2d', { willReadFrequently: true });
-    sx.fillStyle = '#fff'; sx.fillRect(0, 0, sw, sh); sx.drawImage(img, 0, 0, sw, sh);
-    const sd = sx.getImageData(0, 0, sw, sh).data;
-    const q = findPaper(sd, sw, sh) || [[0, 0], [sw - 1, 0], [sw - 1, sh - 1], [0, sh - 1]];
-    const pw = (dist(q[0], q[1]) + dist(q[3], q[2])) / 2, ph = (dist(q[0], q[3]) + dist(q[1], q[2])) / 2;
-    const w = Math.max(8, Math.min(PH * 10, Math.round(pw * PH / ph)));
-    const c = document.createElement('canvas'); c.width = w; c.height = PH;
-    const data = warpQuad(sd, sw, sh, q, w, PH);
-    c.getContext('2d').putImageData(new ImageData(data, w, PH), 0, 0);
-    return { canvas: c, data, w, a: null }; // 분석은 rebuild에서 (길이 옵션을 바꿔도 다시 분석)
-  } finally { URL.revokeObjectURL(url); }
+  try { img.src = url; await img.decode(); return fromImage(img, img.naturalWidth, img.naturalHeight); }
+  finally { URL.revokeObjectURL(url); }
 }
+// 이미지(또는 카메라에서 찍은 캔버스) → 종이를 찾아 높이 PH로 편 그림
+function fromImage(src0, iw, ih) {
+  const k = Math.min(1, SRC / Math.max(iw, ih));
+  const sw = Math.round(iw * k), sh = Math.round(ih * k);
+  const src = document.createElement('canvas'); src.width = sw; src.height = sh;
+  const sx = src.getContext('2d', { willReadFrequently: true });
+  sx.fillStyle = '#fff'; sx.fillRect(0, 0, sw, sh); sx.drawImage(src0, 0, 0, sw, sh);
+  const sd = sx.getImageData(0, 0, sw, sh).data;
+  const q = findPaper(sd, sw, sh) || [[0, 0], [sw - 1, 0], [sw - 1, sh - 1], [0, sh - 1]];
+  const pw = (dist(q[0], q[1]) + dist(q[3], q[2])) / 2, ph = (dist(q[0], q[3]) + dist(q[1], q[2])) / 2;
+  const w = Math.max(8, Math.min(PH * 10, Math.round(pw * PH / ph)));
+  const c = document.createElement('canvas'); c.width = w; c.height = PH;
+  const data = warpQuad(sd, sw, sh, q, w, PH);
+  c.getContext('2d').putImageData(new ImageData(data, w, PH), 0, 0);
+  return { canvas: c, data, w, a: null, edits: [], undo: [] }; // 분석은 rebuild에서 (길이 옵션을 바꿔도 다시 분석)
+}
+
+// --- 카메라: 종이가 테두리 안에 들어와 잠깐 가만히 있으면 자동으로 찍는다 ---
+const camVideo = $('camVideo'), camOver = $('camOver'), CAM_NEED = 7; // 0.15초 × 7 ≈ 1초
+let camStream = null, camTimer = 0, camAppend = false, camStable = 0, camPrev = null, camBusy = false;
+if (!navigator.mediaDevices?.getUserMedia) $('mkCam').hidden = true;
+async function openCam(append) {
+  camAppend = append;
+  try { camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false }); }
+  catch (e) { say('카메라를 열지 못했어요. 브라우저에서 카메라를 허용하거나 "사진 고르기"로 올려 주세요.', true); return; }
+  $('cam').hidden = false; camVideo.srcObject = camStream; camVideo.play().catch(() => {});
+  camStable = 0; camPrev = null; camBusy = false; $('camMsg').textContent = '종이를 테두리 안에 맞춰 주세요';
+  camTimer = setInterval(camTick, 150); $('camClose').focus();
+}
+function closeCam() {
+  clearInterval(camTimer); camStream?.getTracks().forEach(t => t.stop()); camStream = null;
+  camVideo.srcObject = null; $('cam').hidden = true;
+}
+// 테두리: 화면 안에 A4 가로 비율(1.414:1) 상자
+const guideOf = (w, h) => { const gw = Math.min(w * .88, h * .88 * 1.414), gh = gw / 1.414; return { x: (w - gw) / 2, y: (h - gh) / 2, w: gw, h: gh }; };
+const quadArea = q => Math.abs(q.reduce((s, p, i) => { const n = q[(i + 1) % 4]; return s + p[0] * n[1] - n[0] * p[1]; }, 0)) / 2;
+const camSmall = document.createElement('canvas');
+function camTick() {
+  const vw = camVideo.videoWidth, vh = camVideo.videoHeight; if (!vw || camBusy) return;
+  const k = 320 / Math.max(vw, vh), w = Math.round(vw * k), h = Math.round(vh * k);
+  camSmall.width = w; camSmall.height = h;
+  const x = camSmall.getContext('2d', { willReadFrequently: true }); x.drawImage(camVideo, 0, 0, w, h);
+  const q = findPaper(x.getImageData(0, 0, w, h).data, w, h), g = guideOf(w, h), tol = g.w * .07;
+  const inside = q && q.every(([px, py]) => px > g.x - tol && px < g.x + g.w + tol && py > g.y - tol && py < g.y + g.h + tol);
+  const big = q && quadArea(q) > g.w * g.h * .45;
+  const still = q && camPrev && q.every((p, i) => dist(p, camPrev[i]) < g.w * .025);
+  camStable = inside && big ? (still ? camStable + 1 : 1) : 0; camPrev = q;
+  $('camMsg').textContent = !q ? '종이를 테두리 안에 맞춰 주세요' : !inside ? '종이가 테두리 안에 다 들어오게 해 주세요'
+    : !big ? '조금 더 가까이 와 주세요' : '좋아요, 그대로 가만히…';
+  drawCamOverlay(q, g, w, h, inside && big);
+  if (camStable >= CAM_NEED) capture();
+}
+function drawCamOverlay(q, g, w, h, ok) {
+  const bw = camOver.clientWidth, bh = camOver.clientHeight, r = Math.min(devicePixelRatio || 1, 2);
+  camOver.width = bw * r; camOver.height = bh * r;
+  const x = camOver.getContext('2d'); x.setTransform(r, 0, 0, r, 0, 0);
+  const sc = Math.min(bw / w, bh / h), ox = (bw - w * sc) / 2, oy = (bh - h * sc) / 2, P = (px, py) => [ox + px * sc, oy + py * sc];
+  // 테두리 밖은 어둡게
+  x.fillStyle = 'rgba(0,0,0,.45)'; x.fillRect(0, 0, bw, bh);
+  const [gx, gy] = P(g.x, g.y); x.clearRect(gx, gy, g.w * sc, g.h * sc);
+  x.strokeStyle = ok ? COL.gold : COL.ink; x.lineWidth = 3; x.setLineDash(ok ? [] : [10, 8]); x.strokeRect(gx, gy, g.w * sc, g.h * sc); x.setLineDash([]);
+  if (q) {
+    x.strokeStyle = ok ? COL.mint : COL.coral; x.lineWidth = 3; x.beginPath();
+    q.forEach((p, i) => { const [a, b] = P(p[0], p[1]); i ? x.lineTo(a, b) : x.moveTo(a, b); }); x.closePath(); x.stroke();
+  }
+  if (ok) { // 찍힐 때까지 남은 시간
+    x.strokeStyle = COL.gold; x.lineWidth = 6; x.beginPath();
+    x.arc(gx + g.w * sc / 2, gy + g.h * sc / 2, 28, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, camStable / CAM_NEED)); x.stroke();
+  }
+}
+function capture() {
+  const vw = camVideo.videoWidth, vh = camVideo.videoHeight; if (!vw || camBusy) return;
+  camBusy = true;
+  const c = document.createElement('canvas'); c.width = vw; c.height = vh; c.getContext('2d').drawImage(camVideo, 0, 0);
+  if (!reduce) { const f = $('camFlash'); f.style.opacity = '.8'; setTimeout(() => { f.style.opacity = '0'; }, 120); }
+  setTimeout(() => {
+    closeCam();
+    const shot = fromImage(c, vw, vh);
+    mkShots = camAppend ? [...mkShots, shot] : [shot]; mkSel = mkShots.length - 1;
+    say('그림을 읽는 중이에요…'); rebuild();
+    if (!mkLevel) say('그림에서 선을 찾지 못했어요. 진한 펜으로 그리고 밝은 곳에서 다시 찍어 주세요.', true);
+  }, reduce ? 0 : 260);
+}
+$('mkCam').addEventListener('click', () => openCam(false));
+$('mkMore').addEventListener('click', () => openCam(true));
+$('camShot').addEventListener('click', capture);
+$('camClose').addEventListener('click', closeCam);
+$('cam').addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); closeCam(); } });
+
 // 사진 위에 어떻게 읽었는지 칸 색으로 표시 (여러 장일 때 고를 수 있는 작은 그림)
 const CELL = [, 'rgba(63,227,195,.5)', 'rgba(255,106,77,.6)', 'rgba(255,201,74,.65)'];
 function shotView({ canvas, a }, i) {
@@ -256,7 +332,7 @@ $('mkReset').addEventListener('click', () => {
 });
 addEventListener('resize', () => { if (!maker.hidden) drawEditor(); });
 
-function drawPreview(M, res) {
+function drawPreview(M, res, changes = []) {
   const pc = $('mkPv'), ts = Math.max(10, Math.min(24, Math.floor($('mkPvBox').clientWidth / (M.end + 2)))), r = Math.min(devicePixelRatio || 1, 2);
   let top = 5; for (const o of M.objs) top = Math.max(top, (o.t === 'b' ? o.y + o.h : o.y + 1) + 2);
   const w = Math.ceil((M.end + 2) * ts), h = (top + 1) * ts;
@@ -272,6 +348,16 @@ function drawPreview(M, res) {
     else if (o.t === 'p') { x.fillStyle = COL.gold; x.fillRect(ox + 1, Y(o.y + .3), ts - 2, ts * .3); }
     else if (o.t === 'k') { x.fillStyle = COL.gold; x.beginPath(); x.arc(ox + ts / 2, Y(o.y + .5), ts * .36, 0, Math.PI * 2); x.fill(); }
   }
+  // 자동 변환으로 바꾼 곳: 치우거나 낮춘 칸은 빨간 점선, 새 점프 패드는 노란 동그라미
+  x.save(); x.strokeStyle = COL.coral; x.lineWidth = 1.5; x.setLineDash([3, 3]);
+  for (const c of changes) {
+    const o = c.o;
+    if (c.t === 'remove') x.strokeRect(o.x * ts + 1, Y(o.t === 'b' ? o.y + o.h : o.y + 1) + 1, (o.w || 1) * ts - 2, (o.t === 'b' ? o.h : 1) * ts - 2);
+    else if (c.t === 'lower') x.strokeRect(o.x * ts + 1, Y(o.y + o.h) + 1, o.w * ts - 2, ts - 2);
+  }
+  x.setLineDash([]); x.strokeStyle = COL.gold; x.lineWidth = 2;
+  for (const c of changes) if (c.t === 'pad') { x.beginPath(); x.arc(c.x * ts + ts / 2, Y(c.y + .2), ts * .75, 0, Math.PI * 2); x.stroke(); }
+  x.restore();
   for (let j = 0; j < top; j++) { x.fillStyle = j % 2 ? COL.ink : COL.night; x.fillRect(M.end * ts, Y(j + 1), ts * .4, ts); }
   x.fillStyle = COL.mint; x.fillRect(1, Y(1), ts, ts);
   if (res.path) { x.fillStyle = COL.gold; for (const jx of res.path) { x.beginPath(); x.moveTo(jx * ts + ts / 2, gy + 2); x.lineTo(jx * ts + ts / 2 - 3, gy + 8); x.lineTo(jx * ts + ts / 2 + 3, gy + 8); x.fill(); } }
@@ -282,22 +368,27 @@ function drawPreview(M, res) {
     const box = $('mkPvBox'); box.scrollLeft = dx - box.clientWidth / 2;
   }
 }
-function showResult(fixes) {
-  mkRes = solveLevel(mkLevel);
-  $('mkPvBox').hidden = false; drawPreview(mkLevel, mkRes);
-  $('mkPlay').disabled = false; $('mkShare').disabled = !mkRes.path; $('mkFix').hidden = !!mkRes.path; $('mkLink').hidden = true;
-  // 막힌 지점을 그림의 칸으로 되돌려 찾는다 (큐브 앞쪽 x를 덮는 열)
+// 그린 그대로 깰 수 없으면 자동 러너로 달릴 수 있게 자동으로 바꾼다 (autoFix)
+function showResult() {
+  mkRes = solveLevel(mkLevel); mkChanges = [];
+  if (!mkRes.path) { const f = autoFix(mkLevel); mkLevel = f.L; mkChanges = f.changes; mkRes = f.res; }
+  $('mkPvBox').hidden = false; drawPreview(mkLevel, mkRes, mkChanges);
+  $('mkLegend').hidden = !mkChanges.length;
+  $('mkPlay').disabled = false; $('mkShare').disabled = !mkRes.path; $('mkLink').hidden = true; $('mkMore').hidden = $('mkCam').hidden; // 카메라가 있으면 이어 찍기
+  // 변환해도 막히면(드묾) 막힌 지점을 그림의 칸으로 되돌려 찾는다 (큐브 앞쪽 x를 덮는 열)
   mkDead = null;
   if (!mkRes.path && mkRes.dead && mkLevel.colX) {
-    const fx = mkRes.dead.x + 1.3; let best = -Infinity; // 큐브 앞면이 닿은 장애물 칸
+    const fx = mkRes.dead.x + 1.3; let best = -Infinity;
     mkLevel.colX.forEach((xs, pi) => xs.forEach((x, c) => { if (x !== null && x <= fx && x > best) { best = x; mkDead = { shot: mkParts[pi], c }; } }));
-    if (mkDead && !fixes) { mkSel = mkDead.shot; drawShots(); }
+    if (mkDead) { mkSel = mkDead.shot; drawShots(); }
   }
   drawEditor();
   if (mkDead && mkDead.shot === mkSel) { const a = cur().a; edBox.scrollLeft = (mkDead.c + .5) * a.cw * edScale - edBox.clientWidth / 2; }
-  const fixed = fixes ? `${fixes}군데를 고쳤어요. ` : '';
-  if (mkRes.path) say(`${fixed}완주할 수 있는 맵이에요! 점프 ${mkRes.path.length}번이면 깰 수 있어요.`);
-  else say(`${fixed}${Math.round(mkRes.dead ? mkRes.dead.x : mkRes.far)}칸 근처에서 막혀요. 빨간 줄 칸을 고치거나 '자동으로 고치기'를 눌러 보세요. 깰 수 있는 맵만 공유할 수 있어요.`, true);
+  const n = k => mkChanges.filter(c => c.t === k).length;
+  const what = [n('pad') && `점프 패드 ${n('pad')}개 놓기`, n('lower') && `${n('lower')}칸 낮추기`, n('remove') && `${n('remove')}개 치우기`].filter(Boolean).join(', ');
+  if (mkRes.path && !mkChanges.length) say(`그린 그대로 완주할 수 있어요! 점프 ${mkRes.path.length}번이면 깰 수 있어요.`);
+  else if (mkRes.path) say(`자동 러너로 달릴 수 있게 바꿨어요 (${what}). 점프 ${mkRes.path.length}번이면 깰 수 있어요.`);
+  else say(`${Math.round(mkRes.dead ? mkRes.dead.x : mkRes.far)}칸 근처에서 막혀요. 빨간 줄 칸을 고쳐 보세요. 깰 수 있는 맵만 공유할 수 있어요.`, true);
 }
 // 그림을 다시 읽고(길이 옵션이 바뀌어도) 아이가 고친 칸을 그 위에 다시 칠한다
 function analyze(s) {
@@ -311,7 +402,7 @@ let mkParts = []; // 레벨의 몇 번째 장 → mkShots 인덱스
 function relevel() {
   mkParts = mkShots.map((s, i) => s.a ? i : -1).filter(i => i >= 0);
   drawShots();
-  if (!mkParts.length) { mkLevel = null; drawEditor(); $('mkPvBox').hidden = true; $('mkPlay').disabled = $('mkShare').disabled = true; $('mkFix').hidden = true; return; }
+  if (!mkParts.length) { mkLevel = null; drawEditor(); $('mkPvBox').hidden = true; $('mkPlay').disabled = $('mkShare').disabled = true; $('mkLegend').hidden = true; return; }
   mkLevel = columnsToLevel(mkParts.map(i => gridColumns(mkShots[i].a.g, mkShots[i].a.nc, mkShots[i].a.nr)), 1, $('mkName').value.trim() || '내 그림 맵');
   showResult(0);
 }
@@ -319,7 +410,7 @@ function rebuild() { for (const s of mkShots) analyze(s); relevel(); edBox.scrol
 $('mkFile').addEventListener('change', async e => {
   const files = [...e.target.files]; if (!files.length) return;
   say('그림을 읽는 중이에요…');
-  try { mkShots = (await Promise.all(files.map(readDrawing))).map(s => ({ ...s, edits: [], undo: [] })); mkSel = 0; }
+  try { mkShots = await Promise.all(files.map(readDrawing)); mkSel = 0; }
   catch (err) { mkShots = []; say('그림 파일을 열지 못했어요. 사진(JPG, PNG)으로 다시 골라 주세요.', true); return; }
   finally { e.target.value = ''; }
   rebuild();
@@ -328,10 +419,6 @@ $('mkFile').addEventListener('change', async e => {
 });
 $('mkGap').addEventListener('change', rebuild);
 $('mkName').addEventListener('input', () => { if (mkLevel) mkLevel.name = $('mkName').value.trim() || '내 그림 맵'; });
-$('mkFix').addEventListener('click', () => {
-  const f = autoFix(mkLevel); mkLevel = f.L; showResult(f.fixes);
-  if (!f.ok) say(`${f.fixes}군데를 고쳤지만 아직 막혀요. 그림을 조금 단순하게 다시 그려 볼까요?`, true);
-});
 $('mkPlay').addEventListener('click', () => {
   setCustom(mkLevel);
   try { history.replaceState(null, '', '#map=' + encodeLevel(mkLevel)); } catch (e) {}

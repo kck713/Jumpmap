@@ -51,7 +51,9 @@ const BLACK = [20, 20, 30], RED = [220, 50, 50], YELLOW = [250, 220, 40], SKY = 
   const r = C.solveLevel(L);
   check(!r.path && r.dead, '6칸 벽은 깰 수 없음으로 판정');
   const f = C.autoFix(L);
-  check(f.ok && f.fixes > 0 && f.L.objs.some(o => o.t === 'b'), `자동 고치기로 완주 가능 (${f.fixes}번 수정, 벽은 남음)`);
+  check(f.ok && f.fixes > 0 && f.L.objs.some(o => o.t === 'b'), `자동 변환으로 완주 가능 (${f.fixes}번 수정, 벽은 남음)`);
+  const wall = f.L.objs.find(o => o.t === 'b'), kinds = f.changes.map(c => c.t).join(',');
+  check(f.changes.some(c => c.t === 'pad') && wall.h >= 3, `벽 앞에 점프 패드를 놓아 벽을 ${wall.h}칸 높이로 살림 (${kinds})`);
 }
 
 { // 연필 지그재그 = 가시, 블록 아래 지그재그 = 매달린 가시

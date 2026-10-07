@@ -18,12 +18,13 @@ Neon Cube Run: 지오메트리 대시 스타일 원터치 리듬 러너. 바닐�
   - 그림 → 맵: `findPaper` + `warpQuad`(사진에서 종이를 찾아 펴기) → `classifyPixels`(픽셀을 블록·가시·패드로 분류) → `analyzeDrawing`(땅선 제거, 칸 격자, 지그재그 = 가시, 작은 닫힌 공간 채우기, 열 목록) → `columnsToLevel`(여러 장 이어 붙이기). 설정값은 `DRAW`에 있다.
   - `gridColumns(g, nc, nr)`: 칸 격자 → 열 목록. 맵 만들기 화면에서 아이가 칸을 고치면 격자만 바꾸고 이걸로 레벨을 다시 만든다. 격자는 종이 전체(여백 제외)를 덮고, `columnsToLevel`이 장마다 앞뒤 빈 열을 잘라 낸다. `colX[장][열]`은 그 열의 레벨 x(막힌 지점을 그림 칸으로 되돌릴 때 쓴다).
   - 가시 `d: 1`은 블록에 매달린(아래를 향한) 가시다. 판정 박스가 칸 위쪽에 붙는다. 링크에서는 `v` 토큰.
-  - `autoFix(L)`: 사망 지점의 장애물을 하나씩 낮추거나 치워서 깰 수 있게 만든다.
+  - `autoFix(L)`: 아이 그림을 자동 러너로 깰 수 있게 바꾼다. 막힌 곳마다 ① 벽 앞에 점프 패드 놓기(더 멀리 가면 채택) ② 1칸 낮추기(나빠지지 않으면 채택) ③ 치우기 순으로 시도한다. `changes`에 바꾼 내용을 남기고, 맵 만들기 화면은 그린 그대로 깰 수 없으면 항상 자동으로 이걸 돌린다.
   - `encodeLevel` / `decodeLevel`: 공유 링크 `#map=...` 형식. 링크는 외부 입력이므로 decode에서 범위를 검사한다.
 - `src/ui.js`: IIFE 하나에 렌더링(`draw`, `drawBoss`, `spikyBall`), 입력, WebAudio 신스(`basslines`, `schedule`, `sfx`), 메뉴(`pick`, `showMenu`, `start`), 루프(`frame`)가 들어 있다.
   - 타일 픽셀 크기 `T`는 화면 크기에서 계산한다. 월드 좌표에서 화면 좌표로는 `X()`, `Y()`로 바꾼다.
   - 최고 기록은 localStorage `ncr-best-<레벨인덱스>`에 저장한다 (try/catch로 감쌈). 그림 맵(`CUSTOM` = `LEVELS.length`)은 기록을 저장하지 않고, 마지막으로 만든 맵만 `ncr-custom`에 저장한다.
   - 맵 만들기 화면(`#maker`)이 열려 있는 동안 `state === 'maker'`이고, 키보드 점프 입력은 무시한다.
+  - 카메라 자동 촬영(`openCam`, `camTick`, `capture`): 0.15초마다 영상을 긴 변 320px로 줄여 `findPaper`를 돌리고, 종이 네 모서리가 A4 가로 비율 테두리 안에 있고 테두리 넓이의 45% 이상이며 약 1초(7번) 흔들리지 않으면 찍는다. 찍은 프레임은 `fromImage`로 사진과 같은 경로를 탄다. 카메라는 https(GitHub Pages)에서만 열리고, claude.ai 아티팩트 화면에서는 막힌다.
   - 칸 고치기(`drawEditor`, `paint`): 아이가 칠한 칸은 `edits`에 종이 픽셀 x로 기록해 두었다가, 길이 옵션으로 다시 분석해도 `analyze()`가 다시 칠한다. 칠하는 중에는 `touch-action: none`, '움직이기' 도구일 때만 스크롤을 허용한다.
   - `window.claude?.hot` 관련 코드는 claude.ai 아티팩트 뷰어용 핫리로드 훅이다. 일반 브라우저에서는 아무 일도 하지 않으므로 지워도 된다.
 - `src/shell.html`: 단일 다크 테마. 색 토큰은 `:root`에 있고, ui.js의 `COL` 객체와 값을 맞춰 둔다.
