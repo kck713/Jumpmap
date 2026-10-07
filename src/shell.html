@@ -36,6 +36,33 @@ canvas{display:block;width:100%;height:100%}
 .levels button[aria-pressed="true"]{border-color:var(--gold);box-shadow:0 0 14px rgba(255,201,74,.45)}
 .levels button:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
 .overlay .tap{animation:none}}
+.make{pointer-events:auto;font-family:var(--kr);font-size:18px;color:var(--night);background:var(--gold);border:0;border-radius:12px;padding:10px 18px;cursor:pointer;box-shadow:0 0 16px rgba(255,201,74,.4)}
+.make:focus-visible,.maker button:focus-visible,.maker .pickbtn:focus-within,.maker input:focus-visible,.maker select:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
+/* 그림 → 맵 만들기 화면 */
+.maker{position:fixed;inset:0;z-index:10;background:var(--night);overflow:auto;padding:16px;box-sizing:border-box}
+.mk-in{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+.mk-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.mk-head h2{font-family:var(--kr);font-weight:400;font-size:clamp(24px,6vw,34px);margin:0;color:var(--gold)}
+.rules{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.rules li{display:flex;align-items:center;gap:8px;background:var(--dusk);border-radius:10px;padding:8px 10px;font-size:14px}
+.rules i{width:22px;height:22px;border-radius:6px;background:var(--c);flex:none;border:1px solid rgba(244,236,255,.3)}
+.maker p{margin:0;font-size:14px;color:var(--mute);line-height:1.5}
+.pickbtn{position:relative;display:block;text-align:center;font-family:var(--kr);font-size:20px;color:var(--night);background:var(--mint);border-radius:12px;padding:14px;cursor:pointer}
+.pickbtn input{position:absolute;inset:0;opacity:0;width:100%;cursor:pointer}
+.mk-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.mk-row label{display:flex;align-items:center;gap:6px;font-size:14px}
+.maker input:not([type=file]),.maker select{font:inherit;font-size:16px;color:var(--ink);background:var(--dusk);border:1px solid var(--mute);border-radius:8px;padding:6px 8px;min-width:0}
+#mkName{width:11em}
+.shots{display:flex;gap:8px;overflow-x:auto}
+.shots canvas{height:120px;width:auto;border-radius:8px;background:#fff;flex:none}
+.pv{overflow-x:auto;border-radius:10px;background:var(--dusk)}
+.pv canvas{display:block}
+.msg{font-size:15px!important;color:var(--ink)!important;min-height:1.5em}
+.msg.bad{color:var(--coral)!important}
+.maker button.act{font-family:var(--kr);font-size:18px;color:var(--ink);background:var(--dusk);border:2px solid var(--mute);border-radius:12px;padding:8px 16px;cursor:pointer}
+.maker button.act.go{background:var(--gold);color:var(--night);border-color:var(--gold)}
+.maker button.act:disabled{opacity:.4;cursor:default}
+#mkLink{width:100%;box-sizing:border-box;font-size:13px}
 footer{font-size:12.5px;color:var(--mute);text-align:center}
 kbd{font-family:var(--body);border:1px solid var(--mute);border-radius:4px;padding:0 5px;color:var(--ink)}
 </style>
@@ -57,10 +84,38 @@ kbd{font-family:var(--body);border:1px solid var(--mute);border-radius:4px;paddi
       <div class="levels" id="levels">
         <button type="button" data-lv="0" aria-pressed="true">1. 네온 시티<small id="b0">최고 0%</small></button>
         <button type="button" data-lv="1" aria-pressed="false">2. 레이저 괴물<small id="b1">최고 0%</small></button>
+        <button type="button" data-lv="2" aria-pressed="false" id="lvCustom" hidden><span id="cName">내 그림 맵</span><small id="b2">최고 0%</small></button>
       </div>
+      <button type="button" class="make" id="makeBtn">그림으로 맵 만들기</button>
       <div class="tap" id="ovTap">TAP TO START</div>
     </div>
   </div>
+  <section class="maker" id="maker" hidden aria-labelledby="mkTitle">
+    <div class="mk-in">
+      <div class="mk-head"><h2 id="mkTitle">그림으로 맵 만들기</h2><button class="mute" id="mkClose" type="button">닫기</button></div>
+      <ul class="rules">
+        <li><i style="--c:#1d1a22"></i><span><b>검정·진한 색</b> 블록</span></li>
+        <li><i style="--c:#e8423a"></i><span><b>빨강</b> 가시</span></li>
+        <li><i style="--c:#f6d32d"></i><span><b>노랑</b> 점프 패드</span></li>
+        <li><i style="--c:#bcd7f2"></i><span><b>연한 색</b> 꾸미기</span></li>
+      </ul>
+      <p>흰 종이에 그리고 종이만 보이게 찍어 주세요. 큐브는 왼쪽에서 오른쪽으로 달리고, 그림 맨 아래(또는 그려 둔 땅선)가 바닥이에요. 테두리만 그린 모양은 꽉 찬 블록이 돼요. 여러 장을 고르면 순서대로 이어 붙여요.</p>
+      <label class="pickbtn">그림 고르기 · 사진 찍기<input type="file" id="mkFile" accept="image/*" multiple></label>
+      <div class="mk-row">
+        <label>맵 이름 <input id="mkName" maxlength="20" value="내 그림 맵"></label>
+        <label>간격 <select id="mkGap"><option value="2">좁게</option><option value="3" selected>보통</option><option value="4">넓게</option></select></label>
+      </div>
+      <div class="shots" id="mkShots"></div>
+      <div class="pv" id="mkPvBox" hidden><canvas id="mkPv"></canvas></div>
+      <p class="msg" id="mkMsg" role="status"></p>
+      <div class="mk-row">
+        <button class="act" id="mkFix" type="button" hidden>자동으로 고치기</button>
+        <button class="act go" id="mkPlay" type="button" disabled>플레이!</button>
+        <button class="act" id="mkShare" type="button" disabled>링크 공유</button>
+      </div>
+      <input id="mkLink" readonly hidden aria-label="공유 링크">
+    </div>
+  </section>
   <footer>탭·클릭·<kbd>Space</kbd>·<kbd>↑</kbd> 점프 · 누르고 있으면 착지하자마자 연속 점프 · 노란 패드는 높이 튕겨줍니다 · 괴물 레이저: 낮으면 점프, 높으면 그대로 달리기</footer>
 </div>
 <script>

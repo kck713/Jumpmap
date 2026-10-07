@@ -3,31 +3,7 @@
 // - 기본 판정: 게임과 같은 히트박스
 // - 엄격 판정: 가시·공 판정을 넓히고 큐브를 키운 상태 → 여유가 너무 빡빡한 구간을 잡아냅니다.
 const C = require('../src/core.js');
-const DT = 1 / 60;
-
-function solve(L) {
-  const memo = new Set(); let far = 0;
-  function go(s, f) {
-    far = Math.max(far, s.x);
-    if (s.won) return [];
-    if (s.dead || f > 6000) return null;
-    if (s.grounded) {
-      const k = f + '|' + s.y.toFixed(3);
-      if (memo.has(k)) return null; memo.add(k);
-      for (const jump of [false, true]) {
-        const t = { ...s }; let ff = f;
-        C.step(t, DT, jump, L); ff++;
-        if (jump) while (!t.grounded && !t.dead && !t.won) { C.step(t, DT, false, L); ff++; }
-        const r = go(t, ff);
-        if (r) return jump ? [+s.x.toFixed(1), ...r] : r;
-      }
-      return null;
-    }
-    const t = { ...s }; C.step(t, DT, false, L); return go(t, f + 1);
-  }
-  const path = go(C.newPlayer(), 0);
-  return { path, far };
-}
+const solve = L => C.solveLevel(L);
 
 const base = { sw: C.CFG.sw, sh: C.CFG.sh, inset: C.CFG.inset };
 let fail = 0;

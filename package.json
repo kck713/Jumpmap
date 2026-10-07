@@ -6,7 +6,8 @@
   "scripts": {
     "build": "node tools/build.js",
     "verify": "node tools/verify-levels.js",
-    "check": "npm run verify && npm run build",
-    "serve": "npx --yes http-server -c-1 -p 8080 ."
+    "check": "npm run verify && npm run test && npm run build",
+    "serve": "npx --yes http-server -c-1 -p 8080 .",
+    "test": "node tools/test-drawing.js"
   }
 }

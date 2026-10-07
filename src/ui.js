@@ -1,5 +1,8 @@
 // ===== Game shell: render, input, audio =====
 (() => {
+const CUSTOM = LEVELS.length; // 그림으로 만든 맵 자리
+let custom = null;
+const getLevel = i => i === CUSTOM ? { ...custom, objs: custom.objs.map(o => ({ ...o })) } : buildLevel(i);
 let lv = 0, L = buildLevel(0);
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d'), stage = document.getElementById('stage');
 const $ = id => document.getElementById(id);
@@ -8,8 +11,8 @@ const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const COL = { night:'#170d2b', dusk:'#2a1647', coral:'#ff6a4d', gold:'#ffc94a', mint:'#3fe3c3', ink:'#f4ecff' };
 
 let hot = window.claude?.hot?.data ?? {};
-let attempts = 1, bests = [0, 0], best = 0;
-for (let i = 0; i < bests.length; i++) { try { bests[i] = +localStorage.getItem('ncr-best-' + i) || 0; } catch (e) {} }
+let attempts = 1, bests = [0, 0, 0], best = 0;
+for (let i = 0; i < CUSTOM; i++) { try { bests[i] = +localStorage.getItem('ncr-best-' + i) || 0; } catch (e) {} }
 if (hot.bests) bests = bests.map((b, i) => Math.max(b, hot.bests[i] || 0));
 best = bests[0];
 let monY = 2.6, monFlash = 0;
@@ -26,7 +29,7 @@ new ResizeObserver(resize).observe(stage); resize();
 // --- audio: tiny 128 BPM synth loop ---
 let ac = null, muted = false, master, nextBeat = 0, beatN = 0;
 const BPM = 128 * K, SPB = 60 / BPM / 2; // 8th notes
-const basslines = [[45,45,57,45,48,48,60,48,43,43,55,43,40,40,52,47],[38,38,50,38,41,41,53,41,37,37,49,37,36,36,48,44]];
+const basslines = [[45,45,57,45,48,48,60,48,43,43,55,43,40,40,52,47],[38,38,50,38,41,41,53,41,37,37,49,37,36,36,48,44],[41,41,53,41,45,45,57,45,43,43,55,43,48,48,60,47]];
 let bassline = basslines[0];
 function initAudio() {
   if (ac) return; try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
@@ -77,12 +80,13 @@ function release() { hold = false; }
 stage.addEventListener('pointerdown', e => { e.preventDefault(); press(); });
 addEventListener('pointerup', release); addEventListener('pointercancel', release);
 addEventListener('keydown', e => {
+  if (state === 'maker' || e.target.closest?.('input,select,textarea')) return;
   if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') { e.preventDefault(); if (!e.repeat) press(); }
 });
 addEventListener('keyup', e => { if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') release(); });
 
 function pick(i) {
-  lv = i; best = bests[i]; L = buildLevel(i); $('best').textContent = best + '%';
+  lv = i; best = bests[i]; L = getLevel(i); $('best').textContent = best + '%';
   document.querySelectorAll('#levels button').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.lv === i)));
 }
 document.querySelectorAll('#levels button').forEach(b => {
@@ -95,7 +99,7 @@ function showMenu(title, sub) {
 }
 $('menu').addEventListener('click', e => { e.stopPropagation(); e.currentTarget.blur(); p = newPlayer(); showMenu('네온 큐브 런', '레벨을 고르고 화면을 탭하세요. 가시를 피해 끝까지!'); });
 function start(level) {
-  if (level !== undefined) { lv = level; L = buildLevel(lv); bassline = basslines[lv]; best = bests[lv]; attempts = 1; $('best').textContent = best + '%'; }
+  if (level !== undefined) { lv = level; L = getLevel(lv); bassline = basslines[lv]; best = bests[lv]; attempts = 1; $('best').textContent = best + '%'; }
   monY = 2.6;
   for (const o of L.objs) { o._w = 0; o._f = 0; }
   p = newPlayer(); rot = 0; parts = []; state = 'play'; ov.hidden = true; beatN = 0; nextBeat = 0; t0 = performance.now();
@@ -107,7 +111,7 @@ function die() {
   saveBest();
 }
 function saveBest() {
-  const pc = Math.min(100, Math.floor(p.x / L.end * 100)); if (pc > best) { best = pc; bests[lv] = pc; try { localStorage.setItem('ncr-best-' + lv, best); } catch (e) {} }
+  const pc = Math.min(100, Math.floor(p.x / L.end * 100)); if (pc > best) { best = pc; bests[lv] = pc; if (lv !== CUSTOM) try { localStorage.setItem('ncr-best-' + lv, best); } catch (e) {} }
   $('best').textContent = best + '%';
 }
 function win() {
@@ -115,6 +119,135 @@ function win() {
   showMenu(L.boss ? '괴물을 따돌렸어요!' : '클리어!', attempts + '번째 시도에 완주했어요. 다시 하거나 다른 레벨을 골라보세요.');
   state = 'won'; ovTap.textContent = 'TAP TO PLAY AGAIN';
 }
+
+// --- 그림 → 맵 만들기 ---
+const maker = $('maker'), mkMsg = $('mkMsg');
+let mkShots = [], mkLevel = null, mkRes = null;
+const say = (t, bad) => { mkMsg.textContent = t; mkMsg.classList.toggle('bad', !!bad); };
+function setCustom(M) {
+  custom = M; bests[CUSTOM] = 0;
+  $('cName').textContent = '3. ' + M.name; $('lvCustom').hidden = false;
+  try { localStorage.setItem('ncr-custom', encodeLevel(M)); } catch (e) {}
+}
+const shareURL = M => location.href.split('#')[0] + '#map=' + encodeLevel(M);
+function openMaker() {
+  state = 'maker'; maker.hidden = false; $('mkClose').focus();
+}
+function closeMaker() {
+  maker.hidden = true; p = newPlayer(); showMenu('네온 큐브 런', '레벨을 고르고 화면을 탭하세요. 가시를 피해 끝까지!');
+}
+for (const id of ['makeBtn', 'mkClose']) $(id).addEventListener('pointerdown', e => e.stopPropagation());
+$('makeBtn').addEventListener('click', e => { e.stopPropagation(); openMaker(); });
+$('mkClose').addEventListener('click', closeMaker);
+maker.addEventListener('keydown', e => { if (e.key === 'Escape') closeMaker(); });
+
+// 사진을 높이 320px로 줄여서 분석한다 (8칸 → 한 칸 40px)
+const PH = 320;
+async function readDrawing(file) {
+  const url = URL.createObjectURL(file), img = new Image();
+  try {
+    img.src = url; await img.decode();
+    const w = Math.max(8, Math.min(PH * 10, Math.round(img.naturalWidth * PH / img.naturalHeight)));
+    const c = document.createElement('canvas'); c.width = w; c.height = PH;
+    const x = c.getContext('2d', { willReadFrequently: true });
+    x.fillStyle = '#fff'; x.fillRect(0, 0, w, PH); x.drawImage(img, 0, 0, w, PH);
+    return { canvas: c, a: analyzeDrawing(x.getImageData(0, 0, w, PH).data, w, PH) };
+  } finally { URL.revokeObjectURL(url); }
+}
+// 사진 위에 어떻게 읽었는지 칸 색으로 표시
+function shotView({ canvas, a }) {
+  const c = document.createElement('canvas'); c.width = canvas.width; c.height = canvas.height;
+  const x = c.getContext('2d'); x.drawImage(canvas, 0, 0);
+  if (a) {
+    const fill = [, 'rgba(63,227,195,.5)', 'rgba(255,106,77,.6)', 'rgba(255,201,74,.6)'];
+    for (let r = 0; r < a.nr; r++) for (let k = 0; k < a.nc; k++) {
+      const v = a.g[r * a.nc + k]; if (!v) continue;
+      x.fillStyle = fill[v]; x.fillRect(a.x0 + k * a.cs, a.bottom - (r + 1) * a.cs, a.cs, a.cs);
+    }
+    x.strokeStyle = COL.mint; x.lineWidth = 3; x.beginPath(); x.moveTo(a.x0, a.bottom); x.lineTo(a.x0 + a.nc * a.cs, a.bottom); x.stroke();
+  }
+  c.setAttribute('role', 'img'); c.setAttribute('aria-label', a ? '그림을 칸으로 읽은 결과' : '선을 찾지 못한 그림');
+  return c;
+}
+function drawPreview(M, res) {
+  const pc = $('mkPv'), ts = Math.max(10, Math.min(24, Math.floor($('mkPvBox').clientWidth / (M.end + 2)))), r = Math.min(devicePixelRatio || 1, 2);
+  let top = 5; for (const o of M.objs) top = Math.max(top, (o.t === 'b' ? o.y + o.h : o.y + 1) + 2);
+  const w = Math.ceil((M.end + 2) * ts), h = (top + 1) * ts;
+  pc.width = w * r; pc.height = h * r; pc.style.width = w + 'px'; pc.style.height = h + 'px';
+  const x = pc.getContext('2d'); x.setTransform(r, 0, 0, r, 0, 0);
+  const gy = h - ts, Y = v => gy - v * ts;
+  x.fillStyle = COL.dusk; x.fillRect(0, 0, w, h); x.fillStyle = COL.night; x.fillRect(0, gy, w, ts);
+  x.strokeStyle = COL.mint; x.lineWidth = 1; x.beginPath(); x.moveTo(0, gy + .5); x.lineTo(w, gy + .5); x.stroke();
+  for (const o of M.objs) {
+    const ox = o.x * ts;
+    if (o.t === 'b') { x.fillStyle = '#21123b'; x.fillRect(ox, Y(o.y + o.h), o.w * ts, o.h * ts); x.strokeStyle = COL.mint; x.strokeRect(ox + .5, Y(o.y + o.h) + .5, o.w * ts - 1, o.h * ts - 1); }
+    else if (o.t === 's') { x.fillStyle = COL.coral; x.beginPath(); x.moveTo(ox + 1, Y(o.y)); x.lineTo(ox + ts / 2, Y(o.y + .9)); x.lineTo(ox + ts - 1, Y(o.y)); x.fill(); }
+    else if (o.t === 'p') { x.fillStyle = COL.gold; x.fillRect(ox + 1, Y(o.y + .3), ts - 2, ts * .3); }
+    else if (o.t === 'k') { x.fillStyle = COL.gold; x.beginPath(); x.arc(ox + ts / 2, Y(o.y + .5), ts * .36, 0, Math.PI * 2); x.fill(); }
+  }
+  for (let j = 0; j < top; j++) { x.fillStyle = j % 2 ? COL.ink : COL.night; x.fillRect(M.end * ts, Y(j + 1), ts * .4, ts); }
+  x.fillStyle = COL.mint; x.fillRect(1, Y(1), ts, ts);
+  if (res.path) { x.fillStyle = COL.gold; for (const jx of res.path) { x.beginPath(); x.moveTo(jx * ts + ts / 2, gy + 2); x.lineTo(jx * ts + ts / 2 - 3, gy + 8); x.lineTo(jx * ts + ts / 2 + 3, gy + 8); x.fill(); } }
+  else if (res.dead) {
+    const dx = (res.dead.x + 1) * ts;
+    x.strokeStyle = COL.coral; x.lineWidth = 2; x.setLineDash([4, 3]); x.beginPath(); x.moveTo(dx, 0); x.lineTo(dx, h); x.stroke(); x.setLineDash([]);
+    x.strokeRect(res.dead.x * ts, Y(res.dead.y + 1), ts, ts);
+    const box = $('mkPvBox'); box.scrollLeft = dx - box.clientWidth / 2;
+  }
+}
+function showResult(fixes) {
+  mkRes = solveLevel(mkLevel);
+  $('mkPvBox').hidden = false; drawPreview(mkLevel, mkRes);
+  $('mkPlay').disabled = false; $('mkShare').disabled = !mkRes.path; $('mkFix').hidden = !!mkRes.path; $('mkLink').hidden = true;
+  const fixed = fixes ? `${fixes}군데를 고쳤어요. ` : '';
+  if (mkRes.path) say(`${fixed}완주할 수 있는 맵이에요! 점프 ${mkRes.path.length}번이면 깰 수 있어요.`);
+  else say(`${fixed}${Math.round(mkRes.dead ? mkRes.dead.x : mkRes.far)}칸 근처에서 막혀요. 빨간 점선 부분을 다시 그리거나 '자동으로 고치기'를 눌러 보세요. 깰 수 있는 맵만 공유할 수 있어요.`, true);
+}
+function rebuild() {
+  const parts = mkShots.filter(s => s.a).map(s => s.a.cols);
+  if (!parts.length) { mkLevel = null; $('mkPvBox').hidden = true; $('mkPlay').disabled = $('mkShare').disabled = true; $('mkFix').hidden = true; return; }
+  mkLevel = columnsToLevel(parts, +$('mkGap').value, $('mkName').value.trim() || '내 그림 맵');
+  showResult(0);
+}
+$('mkFile').addEventListener('change', async e => {
+  const files = [...e.target.files]; if (!files.length) return;
+  say('그림을 읽는 중이에요…');
+  try { mkShots = await Promise.all(files.map(readDrawing)); }
+  catch (err) { mkShots = []; say('그림 파일을 열지 못했어요. 사진(JPG, PNG)으로 다시 골라 주세요.', true); return; }
+  finally { e.target.value = ''; }
+  $('mkShots').replaceChildren(...mkShots.map(shotView));
+  rebuild();
+  if (!mkLevel) say('그림에서 선을 찾지 못했어요. 진한 펜으로 그리고 밝은 곳에서 찍어 주세요.', true);
+  else if (mkShots.some(s => !s.a)) say(mkMsg.textContent + ' (선이 안 보이는 그림은 뺐어요.)', !mkRes.path);
+});
+$('mkGap').addEventListener('change', rebuild);
+$('mkName').addEventListener('input', () => { if (mkLevel) mkLevel.name = $('mkName').value.trim() || '내 그림 맵'; });
+$('mkFix').addEventListener('click', () => {
+  const f = autoFix(mkLevel); mkLevel = f.L; showResult(f.fixes);
+  if (!f.ok) say(`${f.fixes}군데를 고쳤지만 아직 막혀요. 그림을 조금 단순하게 다시 그려 볼까요?`, true);
+});
+$('mkPlay').addEventListener('click', () => {
+  setCustom(mkLevel);
+  try { history.replaceState(null, '', '#map=' + encodeLevel(mkLevel)); } catch (e) {}
+  maker.hidden = true; pick(CUSTOM); initAudio(); if (ac && ac.state === 'suspended') ac.resume(); start(CUSTOM);
+});
+$('mkShare').addEventListener('click', async () => {
+  const url = shareURL(mkLevel), link = $('mkLink');
+  link.value = url;
+  if (navigator.share) {
+    try { await navigator.share({ title: mkLevel.name, text: `내가 그린 점프맵 "${mkLevel.name}"을 깨 봐!`, url }); return; }
+    catch (e) { if (e.name === 'AbortError') return; }
+  }
+  try { await navigator.clipboard.writeText(url); say('링크를 복사했어요! 친구에게 보내 주세요.'); }
+  catch (e) { link.hidden = false; link.select(); say('아래 링크를 길게 눌러 복사해 주세요.'); }
+});
+// 공유 링크(#map=...)나 마지막으로 만든 맵 불러오기
+function loadShared() {
+  const m = /^#map=(.+)$/.exec(location.hash), M = m && decodeLevel(m[1]);
+  if (M) { setCustom(M); pick(CUSTOM); showMenu('친구가 만든 맵', `"${M.name}" 맵이 도착했어요. 화면을 탭해서 시작!`); return true; }
+  return false;
+}
+addEventListener('hashchange', () => { if (state !== 'play') loadShared(); });
 
 // --- render ---
 function draw(now) {
@@ -290,5 +423,6 @@ function frame(now) {
 $('best').textContent = best + '%'; $('att').textContent = attempts;
 window.claude?.hot?.snapshot?.(() => ({ bests }));
 bests.forEach((b, i) => { $('b' + i).textContent = '최고 ' + b + '%'; });
+if (!loadShared()) { try { const M = decodeLevel(localStorage.getItem('ncr-custom') || ''); if (M) setCustom(M); } catch (e) {} }
 requestAnimationFrame(frame);
 })();
