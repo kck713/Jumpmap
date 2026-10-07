@@ -270,17 +270,17 @@ function analyzeDrawing(d, w, h, rows = DRAW.rows, sx = DRAW.sx) {
       cls.fill(0, bottom * w);
     }
   }
-  let yTop = bottom;
-  for (let i = 0; i < bottom * w; i++) if (cls[i]) { yTop = (i / w) | 0; break; }
-  const nc = Math.max(1, Math.ceil((x1 - x0 + 1) / cw));
-  const nr = Math.max(1, Math.min(DRAW.maxRows, Math.ceil((bottom - yTop) / cs)));
+  // 격자는 종이 전체(여백 제외)를 덮는다: 아이가 빈 곳에도 칸을 칠할 수 있게
+  const mx = Math.round(w * DRAW.margin), gx0 = mx;
+  const nc = Math.max(1, Math.ceil((w - 2 * mx) / cw));
+  const nr = Math.max(1, Math.min(DRAW.maxRows, Math.ceil(bottom / cs)));
   // 칸마다 종류별 잉크 수, 그리고 진한 선이 가로줄 하나에서 몇 번 끊기는지(runs / lines)
   const cnt = new Uint32Array(nc * nr * 4), edge = new Uint32Array(nc * nr * 2), runs = new Uint32Array(nc * nr), lines = new Uint32Array(nc * nr), lastY = new Int32Array(nc * nr).fill(-1);
   for (let y = Math.max(0, Math.floor(bottom - nr * cs)); y < bottom; y++) {
     const r = Math.floor((bottom - 1 - y) / cs); if (r >= nr) continue;
     for (let x = x0; x <= x1; x++) {
       const k = cls[y * w + x]; if (!k) continue;
-      const i = r * nc + Math.floor((x - x0) / cw);
+      const i = r * nc + Math.floor((x - gx0) / cw);
       cnt[i * 4 + k]++;
       const fy = (bottom - 1 - y) / cs - r; // 칸 안의 높이 0(아래)~1(위)
       if (fy > .75) edge[i * 2]++; else if (fy < .25) edge[i * 2 + 1]++;
@@ -318,6 +318,11 @@ function analyzeDrawing(d, w, h, rows = DRAW.rows, sx = DRAW.sx) {
     }
     if (reg.length <= DRAW.fillMax) for (const i of reg) g[i] = 1;
   }
+  return { cols: gridColumns(g, nc, nr), g, nc, nr, x0: gx0, bottom, cs, cw };
+}
+
+// 칸 격자(0 빈칸, 1 블록, 2 가시, 3 패드, 아래 행이 r=0) → 열 목록. 아이가 칸을 고친 뒤에도 이걸로 다시 만든다.
+function gridColumns(g, nc, nr) {
   // 열마다 블록(세로 묶음), 가시, 패드. 1칸 이내로 떠 있으면 아래 바닥에 붙인다
   const cols = [];
   for (let c = 0; c < nc; c++) {
@@ -336,16 +341,26 @@ function analyzeDrawing(d, w, h, rows = DRAW.rows, sx = DRAW.sx) {
     }
     cols.push(col);
   }
-  return { cols, g, nc, nr, x0, bottom, cs, cw };
+  return cols;
 }
 
 // 여러 장의 열 목록을 이어 붙여 레벨을 만든다. 빈 열은 stretch칸으로 늘려 간격을 벌린다.
+// 장마다 앞뒤의 빈 열은 잘라 낸다. colX[장][열] = 그 열이 놓인 레벨 x (잘린 열은 null).
 function columnsToLevel(parts, stretch = 1, name = '내 그림 맵') {
-  const o = [], cols = [];
-  parts.forEach((p, i) => { if (i) for (let k = 0; k < DRAW.gap; k++) cols.push(null); cols.push(...p); });
+  const o = [], cols = [], where = [], colX = parts.map(p => p.map(() => null));
+  const isEmpty = c => !c || !(c.b.length || c.s.length || c.v.length || c.p.length);
+  parts.forEach((p, pi) => {
+    let a = 0, b = p.length - 1;
+    while (a <= b && isEmpty(p[a])) a++;
+    while (b >= a && isEmpty(p[b])) b--;
+    if (a > b) return;
+    if (cols.length) for (let k = 0; k < DRAW.gap; k++) { cols.push(null); where.push(null); }
+    for (let ci = a; ci <= b; ci++) { cols.push(p[ci]); where.push([pi, ci]); }
+  });
   let x = DRAW.lead, open = new Map();
-  for (const c of cols) {
-    const empty = !c || !(c.b.length || c.s.length || c.v.length || c.p.length), next = new Map();
+  for (let j = 0; j < cols.length; j++) {
+    const c = cols[j], empty = isEmpty(c), next = new Map();
+    if (where[j]) colX[where[j][0]][where[j][1]] = x;
     if (!empty) {
       for (const [y, h] of c.b) {
         const k = y + ',' + h, prev = open.get(k);
@@ -358,7 +373,7 @@ function columnsToLevel(parts, stretch = 1, name = '내 그림 맵') {
     }
     open = next; x += empty ? stretch : 1;
   }
-  return { objs: o.sort((a, b) => a.x - b.x), end: x + DRAW.tail, name, boss: false };
+  return { objs: o.sort((a, b) => a.x - b.x), end: x + DRAW.tail, name, boss: false, colX };
 }
 
 // 깰 수 없으면 가장 멀리 간 사망 지점의 장애물을 하나씩 낮추거나 치운다
@@ -407,4 +422,4 @@ function decodeLevel(str) {
   }
   return { objs: objs.sort((a, b) => a.x - b.x), end: E, name: name || '이름 없는 맵', boss: false };
 }
-if (typeof module !== 'undefined') module.exports = { DRAW, findPaper, warpQuad, dist, CFG, buildLevel, LEVELS, newPlayer, step, solveLevel, classifyPixels, analyzeDrawing, columnsToLevel, autoFix, encodeLevel, decodeLevel };
+if (typeof module !== 'undefined') module.exports = { DRAW, gridColumns, findPaper, warpQuad, dist, CFG, buildLevel, LEVELS, newPlayer, step, solveLevel, classifyPixels, analyzeDrawing, columnsToLevel, autoFix, encodeLevel, decodeLevel };

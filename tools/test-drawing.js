@@ -17,7 +17,7 @@ const BLACK = [20, 20, 30], RED = [220, 50, 50], YELLOW = [250, 220, 40], SKY = 
   const P = paper();
   P.rect(0, 300, 959, 305, BLACK);           // 땅선 → 지워져야 함
   for (const [a, b, c, e] of [[300, 262, 379, 265], [300, 296, 379, 299], [300, 262, 303, 299], [376, 262, 379, 299]]) P.rect(a, b, c, e, BLACK); // 속이 빈 상자 (2칸 높이, 한 칸 = 20px)
-  P.rect(560, 282, 589, 299, RED);           // 가시
+  P.rect(562, 282, 584, 299, RED);           // 가시 (2~3칸)
   P.rect(700, 290, 739, 299, YELLOW);        // 점프 패드
   P.rect(100, 40, 250, 150, SKY);            // 연한 하늘색 = 꾸미기
   P.rect(700, 30, 800, 120, [255, 232, 150]); // 연노랑 해 = 꾸미기
@@ -33,6 +33,12 @@ const BLACK = [20, 20, 30], RED = [220, 50, 50], YELLOW = [250, 220, 40], SKY = 
   check(L.objs.every((o, i) => !i || L.objs[i - 1].x <= o.x), '오브젝트가 x 순으로 정렬됨');
   const r = C.solveLevel(L);
   check(!!r.path, '완주 가능' + (r.path ? ' · 점프 ' + r.path.length + '회' : ' · x≈' + r.far.toFixed(1)));
+  // 칸 고치기: 격자를 바꾸고 gridColumns로 다시 만들면 레벨에 반영된다
+  const g2 = a.g.slice(); for (let i = 0; i < g2.length; i++) if (g2[i] === 2) g2[i] = 0;   // 가시 지우기
+  g2[3 * a.nc + 30] = 1;                                                                    // 떠 있는 블록 하나 칠하기
+  const L2 = C.columnsToLevel([C.gridColumns(g2, a.nc, a.nr)]);
+  check(!L2.objs.some(o => o.t === 's') && L2.objs.some(o => o.t === 'b' && o.y === 3 && o.h === 1), '칸 고치기 → 가시 사라지고 떠 있는 블록 생김');
+  check(L.colX[0].filter(x => x !== null).length > 0 && L.colX[0].every((x, i, xs) => x === null || xs.slice(0, i).every(y => y === null || y < x)), '열 → 레벨 x 대응표(colX)가 순서대로');
   const back = C.decodeLevel(C.encodeLevel(L));
   check(back && back.name === '테스트' && back.end === L.end && JSON.stringify(back.objs) === JSON.stringify(L.objs), '공유 링크 인코딩 왕복');
 }

@@ -162,21 +162,100 @@ async function readDrawing(file) {
     return { canvas: c, data, w, a: null }; // 분석은 rebuild에서 (길이 옵션을 바꿔도 다시 분석)
   } finally { URL.revokeObjectURL(url); }
 }
-// 사진 위에 어떻게 읽었는지 칸 색으로 표시
-function shotView({ canvas, a }) {
+// 사진 위에 어떻게 읽었는지 칸 색으로 표시 (여러 장일 때 고를 수 있는 작은 그림)
+const CELL = [, 'rgba(63,227,195,.5)', 'rgba(255,106,77,.6)', 'rgba(255,201,74,.65)'];
+function shotView({ canvas, a }, i) {
   const c = document.createElement('canvas'); c.width = canvas.width; c.height = canvas.height;
   const x = c.getContext('2d'); x.drawImage(canvas, 0, 0);
-  if (a) {
-    const fill = [, 'rgba(63,227,195,.5)', 'rgba(255,106,77,.6)', 'rgba(255,201,74,.6)'];
-    for (let r = 0; r < a.nr; r++) for (let k = 0; k < a.nc; k++) {
-      const v = a.g[r * a.nc + k]; if (!v) continue;
-      x.fillStyle = fill[v]; x.fillRect(a.x0 + k * a.cw, a.bottom - (r + 1) * a.cs, a.cw, a.cs);
-    }
-    x.strokeStyle = COL.mint; x.lineWidth = 3; x.beginPath(); x.moveTo(a.x0, a.bottom); x.lineTo(a.x0 + a.nc * a.cw, a.bottom); x.stroke();
+  if (a) for (let r = 0; r < a.nr; r++) for (let k = 0; k < a.nc; k++) {
+    const v = a.g[r * a.nc + k]; if (v) { x.fillStyle = CELL[v]; x.fillRect(a.x0 + k * a.cw, a.bottom - (r + 1) * a.cs, a.cw, a.cs); }
   }
-  c.setAttribute('role', 'img'); c.setAttribute('aria-label', a ? '그림을 칸으로 읽은 결과' : '선을 찾지 못한 그림');
-  return c;
+  const b = document.createElement('button'); b.type = 'button'; b.append(c);
+  b.setAttribute('aria-label', `${i + 1}번째 그림 고치기`); b.setAttribute('aria-pressed', String(i === mkSel));
+  b.addEventListener('click', () => { mkSel = i; drawShots(); drawEditor(); });
+  return b;
 }
+function drawShots() {
+  const box = $('mkShots'); box.hidden = mkShots.length < 2;
+  if (!box.hidden) box.replaceChildren(...mkShots.map(shotView));
+}
+
+// --- 칸 고치기: 팔레트에서 고른 것으로 칸을 누르거나 문질러 칠한다 ---
+let mkSel = 0, tool = 1, painting = false, edScale = 1, edView = null, mkDead = null, dragPan = null;
+const edBox = $('mkEdBox'), ed = $('mkEd');
+const cur = () => mkShots[mkSel] && mkShots[mkSel].a ? mkShots[mkSel] : null;
+function drawEditor() {
+  const s = cur(); $('mkEdit').hidden = !s; if (!s) return;
+  const a = s.a, r = Math.min(devicePixelRatio || 1, 2);
+  let top = 0; for (let i = 0; i < a.g.length; i++) if (a.g[i]) top = Math.max(top, (i / a.nc | 0) + 1);
+  const rows = Math.min(a.nr, Math.max(6, top + 3));                       // 위쪽 빈 하늘은 조금만 보여 준다
+  edScale = Math.max((edBox.clientWidth || 320) / (a.nc * a.cw), 24 / a.cw); // 칸 폭이 손가락으로 누를 만큼(24px 이상)
+  const k = edScale, W2 = a.nc * a.cw * k, H2 = rows * a.cs * k, oy = a.bottom - rows * a.cs;
+  edView = { x0: a.x0, y0: oy };
+  ed.width = Math.round(W2 * r); ed.height = Math.round(H2 * r); ed.style.width = W2 + 'px'; ed.style.height = H2 + 'px';
+  const x = ed.getContext('2d'); x.setTransform(r, 0, 0, r, 0, 0);
+  x.fillStyle = '#fff'; x.fillRect(0, 0, W2, H2);
+  x.drawImage(s.canvas, -a.x0 * k, -oy * k, s.canvas.width * k, s.canvas.height * k);
+  const cx = c => c * a.cw * k, cy = rr => (rows - rr - 1) * a.cs * k;
+  for (let rr = 0; rr < rows; rr++) for (let c = 0; c < a.nc; c++) {
+    const v = a.g[rr * a.nc + c]; if (!v) continue;
+    x.fillStyle = CELL[v]; x.fillRect(cx(c), cy(rr), a.cw * k, a.cs * k);
+  }
+  x.strokeStyle = 'rgba(42,22,71,.12)'; x.lineWidth = 1; x.beginPath();
+  for (let c = 1; c < a.nc; c++) { x.moveTo(cx(c) + .5, 0); x.lineTo(cx(c) + .5, H2); }
+  for (let rr = 1; rr < rows; rr++) { x.moveTo(0, rr * a.cs * k + .5); x.lineTo(W2, rr * a.cs * k + .5); }
+  x.stroke();
+  x.fillStyle = COL.mint; x.fillRect(0, H2 - 3, W2, 3);                    // 바닥
+  if (mkDead && mkDead.shot === mkSel) {                                     // 막히는 곳
+    x.fillStyle = 'rgba(255,106,77,.22)'; x.fillRect(cx(mkDead.c), 0, a.cw * k, H2);
+    x.strokeStyle = COL.coral; x.lineWidth = 2; x.setLineDash([6, 4]); x.strokeRect(cx(mkDead.c) + 1, 1, a.cw * k - 2, H2 - 2); x.setLineDash([]);
+  }
+}
+function cellAt(e) {
+  const s = cur(); if (!s) return null;
+  const a = s.a, b = ed.getBoundingClientRect();
+  const px = (e.clientX - b.left) / edScale + edView.x0, py = (e.clientY - b.top) / edScale + edView.y0;
+  const c = Math.floor((px - a.x0) / a.cw), r = Math.floor((a.bottom - py) / a.cs);
+  return c >= 0 && c < a.nc && r >= 0 && r < a.nr ? { s, c, r } : null;
+}
+function paint(e) {
+  const h = cellAt(e); if (!h) return;
+  const { s, c, r } = h, i = r * s.a.nc + c;
+  if (s.a.g[i] === tool) return;
+  s.a.g[i] = tool; s.edits.push({ px: s.a.x0 + (c + .5) * s.a.cw, r, k: tool });
+  drawEditor();
+}
+ed.addEventListener('pointerdown', e => {
+  if (tool === 'h') { if (e.pointerType === 'mouse') dragPan = { x: e.clientX, y: e.clientY, l: edBox.scrollLeft, t: edBox.scrollTop }; return; }
+  const s = cur(); if (!s) return;
+  e.preventDefault(); ed.setPointerCapture(e.pointerId);
+  s.undo.push({ g: s.a.g.slice(), n: s.edits.length }); painting = true; paint(e);
+});
+ed.addEventListener('pointermove', e => {
+  if (painting) paint(e);
+  else if (dragPan) { edBox.scrollLeft = dragPan.l - (e.clientX - dragPan.x); edBox.scrollTop = dragPan.t - (e.clientY - dragPan.y); }
+});
+for (const t of ['pointerup', 'pointercancel']) ed.addEventListener(t, () => {
+  dragPan = null;
+  if (!painting) return; painting = false;
+  const s = cur(); if (s && s.undo.length && s.edits.length === s.undo[s.undo.length - 1].n) s.undo.pop(); // 아무것도 안 바뀐 터치
+  else relevel();
+});
+document.querySelectorAll('#mkTools [data-tool]').forEach(b => b.addEventListener('click', () => {
+  tool = b.dataset.tool === 'h' ? 'h' : +b.dataset.tool;
+  document.querySelectorAll('#mkTools [data-tool]').forEach(o => o.setAttribute('aria-pressed', String(o === b)));
+  ed.style.touchAction = tool === 'h' ? 'pan-x pan-y' : 'none'; ed.style.cursor = tool === 'h' ? 'grab' : 'crosshair';
+}));
+$('mkUndo').addEventListener('click', () => {
+  const s = cur(); if (!s || !s.undo.length) return;
+  const u = s.undo.pop(); s.a.g.set(u.g); s.edits.length = u.n; relevel();
+});
+$('mkReset').addEventListener('click', () => {
+  const s = cur(); if (!s) return;
+  s.edits = []; s.undo = []; analyze(s); relevel();
+});
+addEventListener('resize', () => { if (!maker.hidden) drawEditor(); });
+
 function drawPreview(M, res) {
   const pc = $('mkPv'), ts = Math.max(10, Math.min(24, Math.floor($('mkPvBox').clientWidth / (M.end + 2)))), r = Math.min(devicePixelRatio || 1, 2);
   let top = 5; for (const o of M.objs) top = Math.max(top, (o.t === 'b' ? o.y + o.h : o.y + 1) + 2);
@@ -207,22 +286,40 @@ function showResult(fixes) {
   mkRes = solveLevel(mkLevel);
   $('mkPvBox').hidden = false; drawPreview(mkLevel, mkRes);
   $('mkPlay').disabled = false; $('mkShare').disabled = !mkRes.path; $('mkFix').hidden = !!mkRes.path; $('mkLink').hidden = true;
+  // 막힌 지점을 그림의 칸으로 되돌려 찾는다 (큐브 앞쪽 x를 덮는 열)
+  mkDead = null;
+  if (!mkRes.path && mkRes.dead && mkLevel.colX) {
+    const fx = mkRes.dead.x + 1.3; let best = -Infinity; // 큐브 앞면이 닿은 장애물 칸
+    mkLevel.colX.forEach((xs, pi) => xs.forEach((x, c) => { if (x !== null && x <= fx && x > best) { best = x; mkDead = { shot: mkParts[pi], c }; } }));
+    if (mkDead && !fixes) { mkSel = mkDead.shot; drawShots(); }
+  }
+  drawEditor();
+  if (mkDead && mkDead.shot === mkSel) { const a = cur().a; edBox.scrollLeft = (mkDead.c + .5) * a.cw * edScale - edBox.clientWidth / 2; }
   const fixed = fixes ? `${fixes}군데를 고쳤어요. ` : '';
   if (mkRes.path) say(`${fixed}완주할 수 있는 맵이에요! 점프 ${mkRes.path.length}번이면 깰 수 있어요.`);
-  else say(`${fixed}${Math.round(mkRes.dead ? mkRes.dead.x : mkRes.far)}칸 근처에서 막혀요. 빨간 점선 부분을 다시 그리거나 '자동으로 고치기'를 눌러 보세요. 깰 수 있는 맵만 공유할 수 있어요.`, true);
+  else say(`${fixed}${Math.round(mkRes.dead ? mkRes.dead.x : mkRes.far)}칸 근처에서 막혀요. 빨간 줄 칸을 고치거나 '자동으로 고치기'를 눌러 보세요. 깰 수 있는 맵만 공유할 수 있어요.`, true);
 }
-function rebuild() {
-  for (const s of mkShots) s.a = analyzeDrawing(s.data, s.w, PH, DRAW.rows, +$('mkGap').value);
-  $('mkShots').replaceChildren(...mkShots.map(shotView));
-  const parts = mkShots.filter(s => s.a).map(s => s.a.cols);
-  if (!parts.length) { mkLevel = null; $('mkPvBox').hidden = true; $('mkPlay').disabled = $('mkShare').disabled = true; $('mkFix').hidden = true; return; }
-  mkLevel = columnsToLevel(parts, 1, $('mkName').value.trim() || '내 그림 맵');
+// 그림을 다시 읽고(길이 옵션이 바뀌어도) 아이가 고친 칸을 그 위에 다시 칠한다
+function analyze(s) {
+  s.a = analyzeDrawing(s.data, s.w, PH, DRAW.rows, +$('mkGap').value); s.undo = [];
+  if (s.a) for (const e of s.edits) {
+    const c = Math.floor((e.px - s.a.x0) / s.a.cw);
+    if (c >= 0 && c < s.a.nc && e.r < s.a.nr) s.a.g[e.r * s.a.nc + c] = e.k;
+  }
+}
+let mkParts = []; // 레벨의 몇 번째 장 → mkShots 인덱스
+function relevel() {
+  mkParts = mkShots.map((s, i) => s.a ? i : -1).filter(i => i >= 0);
+  drawShots();
+  if (!mkParts.length) { mkLevel = null; drawEditor(); $('mkPvBox').hidden = true; $('mkPlay').disabled = $('mkShare').disabled = true; $('mkFix').hidden = true; return; }
+  mkLevel = columnsToLevel(mkParts.map(i => gridColumns(mkShots[i].a.g, mkShots[i].a.nc, mkShots[i].a.nr)), 1, $('mkName').value.trim() || '내 그림 맵');
   showResult(0);
 }
+function rebuild() { for (const s of mkShots) analyze(s); relevel(); edBox.scrollTop = edBox.scrollHeight; } // 땅 쪽부터 보이게
 $('mkFile').addEventListener('change', async e => {
   const files = [...e.target.files]; if (!files.length) return;
   say('그림을 읽는 중이에요…');
-  try { mkShots = await Promise.all(files.map(readDrawing)); }
+  try { mkShots = (await Promise.all(files.map(readDrawing))).map(s => ({ ...s, edits: [], undo: [] })); mkSel = 0; }
   catch (err) { mkShots = []; say('그림 파일을 열지 못했어요. 사진(JPG, PNG)으로 다시 골라 주세요.', true); return; }
   finally { e.target.value = ''; }
   rebuild();
