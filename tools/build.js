@@ -20,4 +20,6 @@ ${ui}
 </html>
 `;
 fs.writeFileSync(path.join(__dirname, '..', 'index.html'), html);
+fs.mkdirSync(path.join(__dirname, '..', 'dist'), { recursive: true });
+fs.writeFileSync(path.join(__dirname, '..', 'dist', 'index.html'), html);
 console.log('index.html 생성 완료 (' + (html.length / 1024).toFixed(1) + ' KB)');
