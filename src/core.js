@@ -55,10 +55,39 @@ function buildLevel2() {
   K(153, 1.2); S(158); S(159);
   return { objs: o.sort((a, b) => a.x - b.x), end: 168, name: '레이저 괴물', boss: true };
 }
-const LEVELS = [buildLevel1, buildLevel2];
+
+ // ----- 레벨 3: 사진 속 손그림에서 태어난 낙서 우주기지 -----
+function buildLevel3() {
+  const o = [];
+  const S = x => o.push({ t: 's', x, y: 0 });
+  const B = (x, w, h) => o.push({ t: 'b', x, y: 0, w, h });
+  const U = x => o.push({ t: 'u', x, y: 0, w: 1.6, h: .85 });
+  S(14);
+  B(24, 3, 1);
+  U(35);
+  S(45); S(46);
+  B(55, 3, 1); B(58, 3, 2);
+  o.push({ t: 'p', x: 69, y: 0 }); B(73, 3, 3);
+  U(86);
+  S(96); S(97);
+  o.push({ t: 'L', x: 110, y: 0, w: 2.2, len: 2.2, warn: 7, y0: .15, y1: .55 });
+  o.push({ t: 'L', x: 122, y: 0, w: 3, len: 3, warn: 7, y0: 1.25, y1: 1.65 });
+  o.push({ t: 'k', x: 134, y: 0 });
+  return {
+    objs: o.sort((a, b) => a.x - b.x), end: 148,
+    name: '낙서 우주기지', theme: 'doodle', boss: true,
+    coins: [{"x":6.61,"y":0.5},{"x":12.33,"y":0.5},{"x":18.18,"y":0.75},{"x":24.03,"y":2.1},{"x":29.75,"y":0.5},{"x":35.6,"y":2.56},{"x":41.32,"y":0.5},{"x":47.17,"y":2.84},{"x":53.02,"y":0.5},{"x":58.74,"y":2.5},{"x":64.59,"y":0.5},{"x":70.31,"y":3.63},{"x":76.16,"y":3.5},{"x":82.01,"y":0.5},{"x":87.73,"y":2.81},{"x":93.58,"y":0.5},{"x":99.43,"y":1.95},{"x":105.15,"y":0.5},{"x":111,"y":1.94},{"x":116.72,"y":0.5},{"x":122.57,"y":0.5},{"x":128.42,"y":0.5},{"x":134.14,"y":1.78},{"x":139.99,"y":0.5}], decorations: [
+      { x: 4, y: 0, kind: 'portal' }, { x: 25, y: 1, kind: 'door' },
+      { x: 51, y: 0, kind: 'flowers' }, { x: 59, y: 2, kind: 'door' },
+      { x: 79, y: 0, kind: 'flowers' }, { x: 145, y: 0, kind: 'door' }
+    ]
+  };
+}
+
+const LEVELS = [buildLevel1, buildLevel2, buildLevel3];
 function buildLevel(i = 0) { return LEVELS[i](); }
 
-function newPlayer() { return { x: 0, y: 0, vy: 0, grounded: true, dead: false, won: false, padHit: false }; }
+function newPlayer() { return { x: 0, y: 0, vy: 0, grounded: true, dead: false, won: false, padHit: false, coins: 0, coinMask: 0 }; }
 
 function sub(s, dt, hold, L) {
   if (s.grounded && hold) { s.vy = CFG.jumpV; s.grounded = false; s.jumped = true; }
@@ -78,6 +107,8 @@ function sub(s, dt, hold, L) {
         if (py >= top - 0.3 && s.vy <= 0) { s.y = top; s.vy = 0; g = true; }
         else { s.dead = true; return; }
       } else if (hx && Math.abs(s.y - top) < 1e-6 && s.vy <= 0) g = true;
+    } else if (o.t === 'u') {
+      if (R0 > o.x && L0 < o.x + o.w && s.y < o.h && s.y + 1 - a > 0) { s.dead = true; return; }
     } else if (o.t === 's') {
       if (R0 > o.x + 0.5 - CFG.sw && L0 < o.x + 0.5 + CFG.sw && s.y < o.y + CFG.sh && s.y + 1 - a > o.y) { s.dead = true; return; }
     } else if (o.t === 'p') {
@@ -90,6 +121,13 @@ function sub(s, dt, hold, L) {
       if ((nx - cx) ** 2 + (ny - cy) ** 2 < r * r) { s.dead = true; return; }
     } else if (o.t === 'L') {
       if (s.x >= o.x && s.x <= o.x + o.len && s.y + 1 - a > o.y0 && s.y < o.y1) { s.dead = true; return; }
+    }
+  }
+  // Collectibles belong to a run, never to the shared level (solver branches stay independent).
+  for (let i = 0; i < (L.coins || []).length; i++) {
+    const coin = L.coins[i], bit = 1 << i;
+    if (!(s.coinMask & bit) && Math.abs(s.x + .5 - coin.x) < .7 && Math.abs(s.y + .5 - coin.y) < .7) {
+      s.coinMask |= bit; s.coins++;
     }
   }
   s.grounded = g && s.vy <= 0;
